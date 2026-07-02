@@ -27,7 +27,7 @@
     import type { WebauthnAdditionalData } from '$mfa/webauthn/types.ts';
     import { fetchGet, fetchPost, type IResponse } from '$api/fetch';
     import type {
-    ActiveOtp,
+        ActiveOtp,
         CodeChallengeMethod,
         LoginRefreshRequest,
         LoginRequest,
@@ -82,7 +82,7 @@
     let existingMfaUser: undefined | string = $state();
     let providers: AuthProviderTemplate[] = $state([]);
     let mfaPurpose: undefined | MfaPurpose = $state();
-    let mfaKind: undefined | "webauthn" | "otp" = $state();
+    let mfaKind: undefined | 'webauthn' | 'otp' = $state();
     let activeOtps: undefined | ActiveOtp[] = $state();
 
     let isLoading = $state(false);
@@ -303,17 +303,16 @@
             url = '/auth/v1/dev/authorize';
         }
 
-        let res = await fetchPost<undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse>(
-            url,
-            payload,
-            'json',
-            'noRedirect',
-        );
+        let res = await fetchPost<
+            undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse
+        >(url, payload, 'json', 'noRedirect');
         await handleAuthRes(res);
     }
 
     async function handleAuthRes(
-        res?: IResponse<undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse>,
+        res?: IResponse<
+            undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse
+        >,
     ) {
         isLoading = false;
         isAutoRefreshing = false;
@@ -341,10 +340,12 @@
                     activeOtps = body.active_otps;
                     mfaKind = 'otp';
                 } else {
-                    mfaKind = "webauthn";
+                    mfaKind = 'webauthn';
                 }
             } else {
-                console.error('did not receive a proper OtpLoginResponse or WebauthnLoginResponse after HTTP200');
+                console.error(
+                    'did not receive a proper OtpLoginResponse or WebauthnLoginResponse after HTTP200',
+                );
             }
         } else if (res.status === 205) {
             // -> all good, password only account, user needs to update some values
@@ -472,7 +473,7 @@
         mfaKind = undefined;
         err = error;
     }
-    
+
     function onMfaSuccess(data?: WebauthnAdditionalData | OtpAdditionalData) {
         if (!data) {
             // will be empty if the user needs to update values
