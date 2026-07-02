@@ -26,7 +26,7 @@ use rauthy_data::entity::email_rate_limit::EmailRateLimit;
 use rauthy_data::entity::groups::Group;
 use rauthy_data::entity::login_locations::LoginLocation;
 use rauthy_data::entity::mfa_mod_token::MfaModToken;
-use rauthy_data::entity::one_time_password::{self, OneTimePassword, OtpAdditionalData, OtpKind};
+use rauthy_data::entity::one_time_password::{self, OneTimePassword, OtpAdditionalData, OtpKind, OtpServiceReq};
 use rauthy_data::entity::password::PasswordPolicy;
 use rauthy_data::entity::pictures::{PICTURE_STORAGE_TYPE, PictureStorage, UserPicture};
 use rauthy_data::entity::pow::PowEntity;
@@ -743,7 +743,8 @@ pub async fn post_user_mfa_token(
     let user = User::find(user_id.to_string()).await?;
 
     if let Some(password) = payload.password {
-        if user.has_webauthn_enabled() {
+        if user.has_webauthn_enabled()
+            || (RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?) {
             return Err(ErrorResponse::new(
                 ErrorResponseType::BadRequest,
                 "must provide `mfa_code` instead of `password`",
@@ -757,20 +758,30 @@ pub async fn post_user_mfa_token(
             ));
         }
     } else if let Some(code) = payload.mfa_code {
-        if !user.has_webauthn_enabled() {
+        if user.has_webauthn_enabled() {
+            let svc_req = WebauthnServiceReq::find(code).await?;
+            if svc_req.user_id != user.id {
+                return Err(ErrorResponse::new(
+                    ErrorResponseType::BadRequest,
+                    "mismatch in UserID",
+                ));
+            }
+            svc_req.delete().await?;
+        } else if RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await? {
+            let svc_req = OtpServiceReq::find(code).await?;
+            if svc_req.user_id != user.id {
+                return Err(ErrorResponse::new(
+                    ErrorResponseType::BadRequest,
+                    "mismatch in UserID",
+                ));
+            }
+            svc_req.delete().await?;
+        } else {
             return Err(ErrorResponse::new(
                 ErrorResponseType::BadRequest,
                 "must provide `password`",
             ));
         }
-        let svc_req = WebauthnServiceReq::find(code).await?;
-        if svc_req.user_id != user.id {
-            return Err(ErrorResponse::new(
-                ErrorResponseType::BadRequest,
-                "mismatch in UserID",
-            ));
-        }
-        svc_req.delete().await?;
     } else {
         return Err(ErrorResponse::new(
             ErrorResponseType::BadRequest,
@@ -1346,6 +1357,7 @@ pub async fn get_user_otps(
     post,
     path = "/users/{id}/otp",
     tag = "users",
+    request_body = OtpCreateRequest,
     responses(
         (status = 201, description = "Created", body = OtpGetResponse),
         (status = 400, description = "BadRequest", body = ErrorResponse),
@@ -1379,18 +1391,20 @@ pub async fn create_user_otp(
 
     // this prevent to have multiple otp of the same kind
     // should we allow multiple time-based otp?
-    let user = User::find(user_id).await?;
-    if !user.has_otp_of_kind_enabled(&otp_kind).await? {
-        let mut otp = OneTimePassword::create(user.id, payload.otp_name, otp_kind).await?;
-        otp.request_otp().await?;
-
-        let resp: OtpGetResponse = otp.into();
-        return Ok(HttpResponse::Created().json(resp))
-    }
-    Err(ErrorResponse::new(
-        ErrorResponseType::BadRequest,
-        "otp already exist",
-    ))
+    let mut otp = if let Ok(otp) = OneTimePassword::find_kind_for_user(&otp_kind, &user_id).await {
+        if otp.is_active {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "otp already exist",
+            ));
+        }
+        otp
+    } else {
+        OneTimePassword::create(user_id, payload.otp_name, otp_kind).await?
+    };
+    otp.request_otp().await?;
+    let resp: OtpGetResponse = otp.into();
+    return Ok(HttpResponse::Created().json(resp))
 }
 
 /// Activate an OTP
@@ -1401,6 +1415,7 @@ pub async fn create_user_otp(
     put,
     path = "/users/{id}/otp",
     tag = "users",
+    request_body = OtpActivateRequest,
     responses(
         (status = 200, description = "Ok"),
         (status = 400, description = "BadRequest", body = ErrorResponse),
@@ -1432,7 +1447,7 @@ pub async fn activate_user_otp(
     let ip = real_ip_from_req(&req)?;
     token.validate(principal.user_id()?, ip)?;
 
-    if let Ok(mut otp) = OneTimePassword::find(&payload.otp_id).await {
+    if let Ok(mut otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
         otp.validate(&user_id, &payload.otp_code).await?;
         otp.activate().await?;
         return Ok(HttpResponse::Ok().finish())
@@ -1452,6 +1467,7 @@ pub async fn activate_user_otp(
     delete,
     path = "/users/{id}/otp",
     tag = "users",
+    request_body = OtpDeleteRequest,
     responses(
         (status = 200, description = "Ok"),
         (status = 400, description = "BadRequest", body = ErrorResponse),
@@ -1503,17 +1519,15 @@ pub async fn delete_user_otp(
         warn!("Otp delete request from admin for user {} for otp {}", user_id, payload.otp_id);
     }
 
-    if let Ok(otp) = OneTimePassword::find(&payload.otp_id).await {
-        if otp.user_id == user_id {
-            OneTimePassword::delete(&otp.id).await?;
-            // make sure to delete any existing MFA cookie when a key is deleted
-            let cookie = ApiCookie::build(COOKIE_MFA, "", 0);
-            let mut resp = HttpResponse::Ok().finish();
-            if let Err(err) = resp.add_cookie(&cookie) {
-                error!("Error deleting MFA cookie in post_webauthn_delete: {}", err);
-            }
-            return Ok(resp)
+    if let Ok(otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
+        OneTimePassword::delete(&otp.id).await?;
+        // make sure to delete any existing MFA cookie when a key is deleted
+        let cookie = ApiCookie::build(COOKIE_MFA, "", 0);
+        let mut resp = HttpResponse::Ok().finish();
+        if let Err(err) = resp.add_cookie(&cookie) {
+            error!("Error deleting MFA cookie in delete_user_otp: {}", err);
         }
+        return Ok(resp)
     }
 
     Err(ErrorResponse::new(
