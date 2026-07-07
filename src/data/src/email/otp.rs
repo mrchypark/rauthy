@@ -1,5 +1,8 @@
 use crate::{
-    email::{i18n::otp::I18nEmailOtp, mailer::EMail},
+    email::{
+        i18n::otp::I18nEmailOtp,
+        mailer::{EMail, EmailType},
+    },
     entity::{theme::ThemeCssFull, users::User},
     rauthy_config::RauthyConfig,
 };
@@ -70,6 +73,7 @@ pub async fn send_email_otp(code: &str, user: &User) {
     };
 
     let req = EMail {
+        typ: EmailType::OtpRequest,
         recipient_name: user.email_recipient_name(),
         address: user.email.to_string(),
         subject: format!("{email_sub_prefix} - {subject}"),

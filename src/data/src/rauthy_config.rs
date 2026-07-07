@@ -1098,6 +1098,19 @@ Your account has not been compromised and no data was leaked."#.into()),
                         footer: Some("If this code has expired, you can request a new one.".into()),
                         button_text_request_new: None,
                     },
+                    nl: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
                     ru: VarsTemplate {
                         subject: "One Time Password".into(),
                         header: "One Time Password for".into(),

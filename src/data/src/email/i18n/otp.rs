@@ -35,6 +35,7 @@ impl I18nEmailOtp<'_> {
             Language::Fr => (&tpls.fr).into(),
             Language::Ko => (&tpls.ko).into(),
             Language::Nb => (&tpls.nb).into(),
+            Language::Nl => (&tpls.nb).into(),
             Language::Ru => (&tpls.ru).into(),
             Language::Uk => (&tpls.uk).into(),
             Language::ZhHans => (&tpls.zhhans).into(),
