@@ -19,13 +19,11 @@
     import type { OtpResponse } from '$api/types/otp';
 
     let {
-        userId,
         activeOtps,
         purpose,
         onError,
         onSuccess,
     }: {
-        userId: string;
         activeOtps: ActiveOtp[] | OtpResponse[];
         purpose: MfaPurpose;
         onError: (error: string) => void;
@@ -50,7 +48,7 @@
         } else {
             otpId = activeOtps[0].id.toString();
         }
-        otpStartRes = await otpAuthStart(userId, otpId, purpose);
+        otpStartRes = await otpAuthStart(otpId, purpose);
     });
 
     $effect(() => {
@@ -82,7 +80,7 @@
     async function onLoginOtpSubmit(_form: HTMLFormElement, params: URLSearchParams) {
         let otpCode = params.get('otp');
         if (otpStartRes && otpStartRes.data && otpCode) {
-            otpFinishRes = await otpAuthFinish(userId, otpStartRes.data.code, otpCode);
+            otpFinishRes = await otpAuthFinish(otpStartRes.data.code, otpCode);
         }
     }
 </script>

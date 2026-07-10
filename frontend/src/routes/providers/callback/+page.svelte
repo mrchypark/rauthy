@@ -180,11 +180,7 @@
 <ContentCenter>
     {#if mfaPurpose}
         {#if mfaKind == 'webauthn'}
-            <WebauthnRequest
-                purpose={mfaPurpose}
-                onSuccess={onMfaSuccess}
-                onError={onMfaError}
-            />
+            <WebauthnRequest purpose={mfaPurpose} onSuccess={onMfaSuccess} onError={onMfaError} />
         {:else if mfaKind == 'otp' && activeOtps}
             <OtpRequest
                 {activeOtps}

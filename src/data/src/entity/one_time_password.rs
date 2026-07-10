@@ -482,7 +482,7 @@ impl OtpData {
 pub enum OtpAdditionalData {
     Login(OtpLoginReq),
     Service(OtpServiceReq),
-    Test,
+    Test(String), // saves the User ID
     LoginToSAwait(OtpLoginToSAwaitCode),
 }
 
@@ -493,7 +493,7 @@ impl OtpAdditionalData {
             // The service req data is not deleted here, but actually further down the road
             // after the service req has been made.
             Self::Service(_) => Ok(()),
-            Self::Test => Ok(()),
+            Self::Test(_) => Ok(()),
             Self::LoginToSAwait(_) => Ok(()),
         }
     }
@@ -530,12 +530,11 @@ impl OtpAdditionalData {
                 }
             }
             Self::Service(svc_req) => HttpResponse::Accepted().json(svc_req),
-            Self::Test => HttpResponse::Accepted().finish(),
+            Self::Test(_) => HttpResponse::Accepted().finish(),
             Self::LoginToSAwait(tos_req) => {
                 let mut resp = HttpResponseBuilder::new(StatusCode::from_u16(206).unwrap()).json(
                     &ToSAwaitLoginResponse {
                         tos_await_code: tos_req.await_code,
-                        user_id: None,
                         force_accept: None,
                     },
                 );
@@ -652,26 +651,32 @@ pub struct OtpLoginToSAwaitCode {
 }
 
 pub async fn auth_start(
-    user_id: &String,
+    user_id: Option<String>,
     payload: &OtpAuthStartRequest,
 ) -> Result<OtpAuthStartResponse, ErrorResponse> {
-    let add_data = match &payload.purpose {
+    let (add_data, user_id) = match &payload.purpose {
         MfaPurpose::Login(code) => {
+            debug_assert!(user_id.is_none());
             let d = OtpLoginReq::find(code).await?;
-            OtpAdditionalData::Login(d)
+            let user_id = d.user_id.clone();
+            (OtpAdditionalData::Login(d), user_id)
         }
         MfaPurpose::MfaModToken
         | MfaPurpose::PamLogin
         | MfaPurpose::PasswordNew
         | MfaPurpose::PasswordReset => {
+            let user_id = user_id.expect("user_id should always exist for non-login otp starts");
             let svc_req = OtpServiceReq::new(user_id.clone());
             svc_req.save().await?;
-            OtpAdditionalData::Service(svc_req)
+            (OtpAdditionalData::Service(svc_req), user_id)
         }
-        MfaPurpose::Test => OtpAdditionalData::Test,
+        MfaPurpose::Test => {
+            let user_id = user_id.expect("user_id should always exist for non-login otp starts");
+            (OtpAdditionalData::Test(user_id.clone()), user_id)
+        }
     };
 
-    let mut otp = OneTimePassword::find_by_id_for_user(&payload.otp_id, user_id).await?;
+    let mut otp = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await?;
     otp.request_otp().await?;
 
     add_data.delete().await?;
@@ -688,7 +693,6 @@ pub async fn auth_start(
 }
 
 pub async fn auth_finish(
-    user_id: String,
     req: &HttpRequest,
     browser_id: BrowserId,
     session: Option<Session>,
@@ -697,16 +701,21 @@ pub async fn auth_finish(
     let auth_data = OtpData::find(payload.code).await?;
     auth_data.delete().await?;
 
+    let (user_id, is_login) = match &auth_data.data {
+        OtpAdditionalData::Login(d) => (&d.user_id, true),
+        OtpAdditionalData::Service(d) => (&d.user_id, false),
+        OtpAdditionalData::Test(user_id) => (user_id, false),
+        OtpAdditionalData::LoginToSAwait(d) => (&d.user_id, false),
+    };
+
     let otp = OneTimePassword::find(&auth_data.otp_id).await?;
-    match otp.validate(&user_id, &payload.otp_code).await {
+    match otp.validate(user_id, &payload.otp_code).await {
         Ok(_) => {
             let mut user = User::find(user_id.clone()).await?;
 
             LoginLocation::spawn_background_check(user.clone(), req, browser_id)?;
 
-            if matches!(auth_data.data, OtpAdditionalData::Login(_))
-                && let Some(mut session) = session
-            {
+            if is_login && let Some(mut session) = session {
                 session.set_authenticated(&user).await?;
                 user.last_login = Some(Utc::now().timestamp());
                 user.last_failed_login = None;
@@ -735,7 +744,7 @@ pub async fn auth_finish(
 
                     Ok(OtpAdditionalData::LoginToSAwait(OtpLoginToSAwaitCode {
                         await_code: code_await.await_code,
-                        user_id,
+                        user_id: user.id,
                         header_origin: data.header_origin,
                     }))
                 } else {

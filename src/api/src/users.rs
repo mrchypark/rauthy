@@ -1620,7 +1620,7 @@ pub async fn post_otp_auth_start(
         }
     };
 
-    one_time_password::auth_start(&id, &payload)
+    one_time_password::auth_start(Some(id), &payload)
         .await
         .map(|res| HttpResponse::Ok().json(res))
 }
@@ -1642,7 +1642,7 @@ pub async fn post_otp_auth_start(
 )]
 #[post("/users/{id}/otp/auth/finish")]
 pub async fn post_otp_auth_finish(
-    id: web::Path<String>,
+    _id: web::Path<String>,
     req: HttpRequest,
     browser_id: BrowserId,
     principal: ReqPrincipal,
@@ -1657,7 +1657,85 @@ pub async fn post_otp_auth_finish(
     }
     payload.validate()?;
 
-    let id = id.into_inner();
+    // We do not need to further validate the principal here.
+    // All of this is done at the /start endpoint.
+    // This here will simply fail, if the secret code from the /start does not exist
+    // -> indirect validation through existing code.
+
+    let principal = principal.into_inner();
+    let res = one_time_password::auth_finish(&req, browser_id, principal.session, payload).await?;
+    Ok(res.into_response())
+}
+
+/// Starts the authentication process using OTP for this user. This only works during
+/// the login. Service requests need to use the user-specific endpoint.
+#[utoipa::path(
+    post,
+    path = "/users/otp_start",
+    tag = "mfa",
+    request_body = OtpAuthStartRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAuthStartResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[post("/users/otp_start")]
+pub async fn post_otp_auth_start_login(
+    principal: ReqPrincipal,
+    Json(payload): Json<OtpAuthStartRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    payload.validate()?;
+    let id = match payload.purpose {
+        MfaPurpose::Login(_) => {
+            // During Login, the session is allowed to be in init-only state. Realistically, the
+            // session middleware will not accept an init-session on this path, only authenticated
+            // ones, but we keep the logic here correct.
+            principal.validate_session_auth_or_init()?;
+            // The user.id might not exist in the session yet at this point. However, it's stored
+            // inside the Otp login data. The `start_start()` will take care of it.
+            None
+        }
+        MfaPurpose::PasswordReset => {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "Password requests must use the user-specific otp start endpoint",
+            ));
+        }
+        _ => {
+            // for all other purposes, we need an authenticated session
+            principal.validate_session_auth()?;
+            Some(principal.user_id()?.to_string())
+        }
+    };
+    one_time_password::auth_start(id, &payload)
+        .await
+        .map(|res| HttpResponse::Ok().json(res))
+}
+
+/// Finishes the authentication process using OTP for this user.
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    post,
+    path = "/users/otp_finish",
+    tag = "mfa",
+    request_body = OtpAuthFinishRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAdditionalData),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[post("/users/otp_finish")]
+pub async fn post_otp_auth_finish_login(
+    req: HttpRequest,
+    browser_id: BrowserId,
+    principal: ReqPrincipal,
+    Json(payload): Json<OtpAuthFinishRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    payload.validate()?;
 
     // We do not need to further validate the principal here.
     // All of this is done at the /start endpoint.
@@ -1665,8 +1743,7 @@ pub async fn post_otp_auth_finish(
     // -> indirect validation through existing code.
 
     let principal = principal.into_inner();
-    let res =
-        one_time_password::auth_finish(id, &req, browser_id, principal.session, payload).await?;
+    let res = one_time_password::auth_finish(&req, browser_id, principal.session, payload).await?;
     Ok(res.into_response())
 }
 

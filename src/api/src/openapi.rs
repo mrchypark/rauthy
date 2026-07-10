@@ -246,7 +246,9 @@ use utoipa::{OpenApi, openapi};
         users::activate_user_otp,
         users::delete_user_otp,
         users::post_otp_auth_start,
+        users::post_otp_auth_start_login,
         users::post_otp_auth_finish,
+        users::post_otp_auth_finish_login,
     ),
     components(
         schemas(

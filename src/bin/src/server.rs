@@ -700,7 +700,9 @@ fn api_services() -> actix_web::Scope {
                 .service(users::activate_user_otp)
                 .service(users::delete_user_otp)
                 .service(users::post_otp_auth_start)
+                .service(users::post_otp_auth_start_login)
                 .service(users::post_otp_auth_finish)
+                .service(users::post_otp_auth_finish_login)
                 .service(html::get_static_assets), // catch-all GET routes
         )
 }

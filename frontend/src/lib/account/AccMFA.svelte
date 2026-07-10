@@ -407,11 +407,7 @@
         </div>
     {:else}
         {#if mfaPurpose && mfaKind == 'webauthn'}
-            <WebauthnRequest
-                purpose={mfaPurpose}
-                onSuccess={onMfaSuccess}
-                onError={onMfaError}
-            />
+            <WebauthnRequest purpose={mfaPurpose} onSuccess={onMfaSuccess} onError={onMfaError} />
         {/if}
 
         <p>
@@ -480,7 +476,6 @@
 
         {#if mfaPurpose && mfaKind == 'otp'}
             <OtpRequest
-                userId={user.id}
                 activeOtps={otps}
                 purpose={mfaPurpose}
                 onSuccess={onMfaSuccess}

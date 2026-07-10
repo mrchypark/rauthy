@@ -216,7 +216,6 @@ pub async fn map_auth_step(
             Ok(builder.json(&OtpLoginResponse {
                 code: res.code,
                 active_otps: res.active_otps,
-                user_id: res.user_id,
             }))
         }
 

@@ -322,7 +322,6 @@ pub(crate) async fn finish_authorize(
             code: get_rand(48),
             header_csrf: Session::get_csrf_header(&session.csrf_token),
             header_origin: data.header_origin,
-            user_id: user.id.clone(),
             email: user.email.clone(),
             active_otps: user.get_otp_kind().await?,
         };

@@ -439,7 +439,6 @@ pub struct ActiveOtp {
 pub struct OtpLoginResponse {
     pub code: String,
     pub active_otps: Vec<ActiveOtp>,
-    pub user_id: String,
 }
 
 #[derive(Deserialize, Validate, ToSchema)]

@@ -130,23 +130,22 @@ pub async fn get_authorize(
 
     // check if the user needs to do the Webauthn login each time
     let mut action = FrontendAction::None;
-    if !force_new_session
-        && let Ok(mfa_cookie) =
-            WebauthnCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
-        && let Ok(user) = User::find_by_email(mfa_cookie.email.clone()).await
-    {
+    if !force_new_session {
         // we need to check this because a user could deactivate MFA in another browser or
         // be deleted while still having existing mfa cookies somewhere else
-        if user.has_webauthn_enabled() {
+        if let Ok(mfa_cookie) =
+            WebauthnCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
+            && let Ok(user) = User::find_by_email(mfa_cookie.email.clone()).await
+            && user.has_webauthn_enabled()
+        {
+            action = FrontendAction::MfaLogin(mfa_cookie.email);
+        } else if let Ok(mfa_cookie) =
+            OtpCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
+            && let Ok(user) = User::find_by_email(mfa_cookie.email.clone()).await
+            && user.has_otp_enabled().await?
+        {
             action = FrontendAction::MfaLogin(mfa_cookie.email);
         }
-    } else if RauthyConfig::get().vars.otp.enable
-        && let Ok(mfa_cookie) = OtpCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
-        && let Ok(user) = User::find_by_email(mfa_cookie.email.clone()).await
-        && user.has_otp_enabled().await?
-    {
-        action = FrontendAction::MfaLogin(mfa_cookie.email);
-        force_new_session = false;
     }
 
     // check for `prompt=none` and redirect if we don't have a valid session

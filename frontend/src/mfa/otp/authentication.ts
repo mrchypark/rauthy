@@ -10,7 +10,6 @@ import type {
 } from './types';
 
 export async function otpAuthStart(
-    userId: string,
     otpId: string,
     purpose: MfaPurpose,
 ): Promise<OtpAuthStartResult> {
@@ -18,10 +17,7 @@ export async function otpAuthStart(
         otp_id: otpId,
         purpose,
     };
-    let res = await fetchPost<OtpAuthStartResponse>(
-        `/auth/v1/users/${userId}/otp/auth/start`,
-        payloadStart,
-    );
+    let res = await fetchPost<OtpAuthStartResponse>(`/auth/v1/users/otp_start`, payloadStart);
     if (res.error) {
         console.error(res.error);
         return {
@@ -37,20 +33,13 @@ export async function otpAuthStart(
     return { data: res.body };
 }
 
-export async function otpAuthFinish(
-    userId: string,
-    code: string,
-    otpCode: string,
-): Promise<OtpAuthFinishResult> {
+export async function otpAuthFinish(code: string, otpCode: string): Promise<OtpAuthFinishResult> {
     let payloadFinish: OtpAuthFinishRequest = {
         code,
         otp_code: otpCode,
     };
     console.log('payload start finish: ', payloadFinish);
-    let res = await fetchPost<OtpAdditionalData>(
-        `/auth/v1/users/${userId}/otp/auth/finish`,
-        payloadFinish,
-    );
+    let res = await fetchPost<OtpAdditionalData>(`/auth/v1/users/otp_finish`, payloadFinish);
     if (res.status === 202 || res.status === 206) {
         return {
             data: res.body,
