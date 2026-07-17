@@ -502,6 +502,9 @@
 
 <svelte:head>
     <title>Login: {clientName || clientId}</title>
+    {#if clientLogoUpdated > -1}
+        <link rel="icon" href={`/auth/v1/clients/${clientId}/logo?updated=${clientLogoUpdated}`} />
+    {/if}
 </svelte:head>
 
 <Template id={TPL_AUTH_PROVIDERS} bind:value={providers} />
