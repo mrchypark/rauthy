@@ -55,45 +55,45 @@ export const I18nEn: I18n = {
     account: {
         account: 'User Account',
         accType: 'Account Type',
-        accTypePasskeyText1: `This account is currently a passkey only account.\nThis means, that 
+        accTypePasskeyText1: `This account is currently a passkey only account.\nThis means, that
             you do not have any password, because you don't need one.`,
-        accTypePasskeyText2: `You can convert your account and add a password. But keep\nin mind, 
-            that this implies, that you need to verify each new device with the password 
-            additionally.\nYou then cannot just log in on any device, where you have not entered 
+        accTypePasskeyText2: `You can convert your account and add a password. But keep\nin mind,
+            that this implies, that you need to verify each new device with the password
+            additionally.\nYou then cannot just log in on any device, where you have not entered
             the password beforehand at\nleast once.`,
         accTypePasskeyText3: 'Do you want to convert your account and add a password?',
         accessExp: 'Access Expires',
         accessRenew: 'Access renewable until',
         accessRenewDelete: 'Delete the possibility to renew',
         birthdate: 'Birthdate',
-        canModifyFor: 'Passkeys can be modified for:',
+        canModifyFor: 'MFA can be modified for:',
         city: 'City',
         changePassword: 'Change Password',
         convertAccount: 'Convert Account',
-        convertAccountP1: `You can convert your account to a Passkey-Only account.\nThis conversion 
+        convertAccountP1: `You can convert your account to a Passkey-Only account.\nThis conversion
             deletes your password and you can and must only ever login with your registered\n
-            passkeys. Keep in mind, that only passkeys with the additional User Verification will 
-            be accepted.\nIf you passkeys support this, you will find a small symbol behind the 
+            passkeys. Keep in mind, that only passkeys with the additional User Verification will
+            be accepted.\nIf you passkeys support this, you will find a small symbol behind the
             name of the key on the 'MFA'\npage.`,
         country: 'Country',
         deleteAccount: {
             deleteAccount: 'Delete Account',
-            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To 
+            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To
                 confirm, please enter:`,
         },
         deviceId: 'ID',
         deviceName: 'Name',
         devices: 'Devices',
         devicesDesc: 'Devices linked to this account',
-        emailUpdateConfirm: `The E-Mail address has not been updated yet. A message has been\nsent 
-            out to your new address. You need to click the confirmation link inside it. Once it 
+        emailUpdateConfirm: `The E-Mail address has not been updated yet. A message has been\nsent
+            out to your new address. You need to click the confirmation link inside it. Once it
             has been\nconfirmed, your new address will be updated.`,
         emailVerified: 'E-Mail verified',
         familyName: 'Family Name',
-        federatedConvertPassword1: `You have a federated account. This means you log in\nby using 
+        federatedConvertPassword1: `You have a federated account. This means you log in\nby using
             an external authentication provider. Your current provider is:`,
-        federatedConvertPassword2: `You can request a password reset via email. This will\nadd a 
-            local password to your account upon completion. You would then be able to log in via 
+        federatedConvertPassword2: `You can request a password reset via email. This will\nadd a
+            local password to your account upon completion. You would then be able to log in via
             your\nexternal provider or by local password. Do you want to request a reset?`,
         generateRandom: 'Generate Randomly',
         givenName: 'Given Name',
@@ -137,7 +137,7 @@ export const I18nEn: I18n = {
             preferredUsername: 'Preferred Username',
         },
         providerLink: 'Federate Account',
-        providerLinkDesc: `You can link this account to one of the following login providers.\nAfter 
+        providerLinkDesc: `You can link this account to one of the following login providers.\nAfter
             activating this function, you will be redirected to the login page of the chosen one.\n
             After a successful login and if the email matches, your account will be linked.`,
         providerUnlink: 'Unlink Federation',
@@ -152,7 +152,7 @@ export const I18nEn: I18n = {
         userEnabled: 'User Enabled',
         userExpiry: 'User Expires',
         userVerifiedTooltip: 'Secured with fingerprint or PIN',
-        webIdDesc: `You can configure the fields that should be exposed with your WebID.\nThis is a 
+        webIdDesc: `You can configure the fields that should be exposed with your WebID.\nThis is a
             feature used by some networks for decentralized logins. If you do not know what it is,
             \nyou most probably do not need it.`,
         webIdDescData: 'You can add custom data fields to your WebID in valid FOAF Vocabulary',
@@ -160,7 +160,7 @@ export const I18nEn: I18n = {
         zip: 'ZIP / Postal Code',
     },
     authorize: {
-        clientForceMfa: `This login forces MFA to achieve higher security.\nTo get access, you need 
+        clientForceMfa: `This login forces MFA to achieve higher security.\nTo get access, you need
             to log in to your account and add at least one additional Passkey`,
         clientGroupPrefixForbidden: 'Missing group assignment for this login',
         email: 'E-Mail',
@@ -168,13 +168,14 @@ export const I18nEn: I18n = {
         emailRequired: 'E-Mail is required',
         emailSentMsg: 'If your E-Mail exists, a request has been sent',
         expectingPasskey: 'Expecting Passkey Authentication',
+        expectingOtp: 'Expecting OTP Authentication',
         http429: 'Too many invalid inputs. Locked until:',
         invalidCredentials: 'Invalid credentials',
         invalidKeyUsed: 'Invalid Key',
         login: 'Login',
         mfaAck: 'Acknowledged',
         navigateToAccount: 'Account Dashboard',
-        needsUserUpdate: `Some information for this account is missing. You need to update these 
+        needsUserUpdate: `Some information for this account is missing. You need to update these
             values before you can proceed with the login.`,
         orLoginWith: 'or login with',
         password: 'Password',
@@ -182,7 +183,7 @@ export const I18nEn: I18n = {
         passwordForgotten: 'Password forgotten?',
         passwordRequest: 'Request',
         passwordRequired: 'Password is required',
-        passwordResetDesc: `Please provide your E-Mail to request a password reset link. If your 
+        passwordResetDesc: `Please provide your E-Mail to request a password reset link. If your
             address exists in out database, you will receive a link via E-Mail.`,
         passwordResetSuccess: 'Request received. You can close this window now.',
         requestExpires: 'Request expires',
@@ -226,24 +227,38 @@ export const I18nEn: I18n = {
         cancel: 'Cancel',
     },
     mfa: {
-        p1: `If you plan on using your MFA key with multiple systems like Windows and Android, 
-            you should do the registration with Android.`,
-        p2: `Android is the platform with the least supported features for the passwordless 
-            technology. Keys you register with Android work elsewhere too. However, this does not 
-            apply the other way around.`,
-        p3: 'For more information, see',
-        docLinkText: 'the documentation about passkeys',
+        webauthn: {
+            title: 'Passkeys',
+            p1: `If you plan on using your MFA key with multiple systems like Windows and Android,
+                you should do the registration with Android.`,
+            p2: `Android is the platform with the least supported features for the passwordless
+                technology. Keys you register with Android work elsewhere too. However, this does not
+                apply the other way around.`,
+            p3: 'For more information, see',
+            docLinkText: 'the documentation about passkeys',
+            unsupportedText:
+                'Your browser does not support Webauthn credentials and must be updated.',
+        },
+        otp: {
+            title: 'One time password',
+            titleEmail: 'Email-based OTP',
+            activationCode: 'Please enter the OTP code that was sent to your email address.',
+            code: 'One Time Password',
+        },
         errorReg: 'Error starting the Registration process',
         lastUsed: 'Last used',
         noKey: 'No Security key registered on this slot',
-        reAuthenticatePasskey: `Before you can modify Passkeys, you need to authenticate with an 
-            already registered one:`,
+        reAuthenticatePasskey:
+            'Before you can modify your MFA, you need to authenticate with a passkey:',
         reAuthenticatePwd:
-            'Before you can modify Passkeys, you need to re-authenticate with your password.',
+            'Before you can modify your MFA, you need to re-authenticate with your password.',
+        reAuthenticateOtp:
+            'Before you can modify your MFA, you need to re-authenticate with an OTP:',
         register: 'Register',
-        registerNew: 'Register New Key',
+        registerNew: 'Register New',
         registerd: 'Registered',
         registerdKeys: 'Registered Keys',
+        registerdOtps: 'Registered OTPs',
         passkeyName: 'Passkey Name',
         passkeyNameErr: '2 - 32 non-special characters',
         passwordInvalid: 'Password Invalid',
@@ -277,9 +292,9 @@ export const I18nEn: I18n = {
         generate: 'Generate',
         newAccDesc1:
             'You have the option between two account types: passwordless or traditional password',
-        newAccDesc2: `The passwordless account is always preferred, because it provides\na way with 
-            stronger security. You will need at least one passkey (Yubikey, Apple Touch ID, Windows 
-            Hello,\n...) to create such an account. Your device must embrace the FIDO2 standard. 
+        newAccDesc2: `The passwordless account is always preferred, because it provides\na way with
+            stronger security. You will need at least one passkey (Yubikey, Apple Touch ID, Windows
+            Hello,\n...) to create such an account. Your device must embrace the FIDO2 standard.
             For more information\nabout this, you may follow this link: `,
         newAccount: 'New Account',
         passwordReset: 'Password Reset',
@@ -293,7 +308,7 @@ export const I18nEn: I18n = {
         success2: 'You will be redirected shortly.',
         success3: 'If you are not being redirected, please click here:',
         successPasskey1: 'Your new passkey has been registered successfully.',
-        successPasskey2: `Please log into your account and register a second backup key as\nsoon as 
+        successPasskey2: `Please log into your account and register a second backup key as\nsoon as
             possible. With a passkey only account, you wil not be able to use a password reset via\n
             E-Mail in case you lose your current key.`,
     },

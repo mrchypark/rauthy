@@ -55,44 +55,44 @@ export const I18nNb: I18n = {
     account: {
         account: 'Brukerkonto',
         accType: 'Kontotype',
-        accTypePasskeyText1: `Dette er en 'Passkey-Only' konto. Det betyr at denne kontoen ikke har 
+        accTypePasskeyText1: `Dette er en 'Passkey-Only' konto. Det betyr at denne kontoen ikke har
             passord og heller ikke trenger det.`,
-        accTypePasskeyText2: `Du kan endre kontoen til en passord-konto. Men husk at dette 
-            innebærer at du må verifisere hver nye enhet med passord i tillegg. Du kan da ikke bare 
-            logge inn på en hvilken som helst enhet hvor du ikke har skrevet inn passordet minst én 
+        accTypePasskeyText2: `Du kan endre kontoen til en passord-konto. Men husk at dette
+            innebærer at du må verifisere hver nye enhet med passord i tillegg. Du kan da ikke bare
+            logge inn på en hvilken som helst enhet hvor du ikke har skrevet inn passordet minst én
             gang før.`,
         accTypePasskeyText3: 'Vil du endre denne kontoen og legge til et passord?',
         accessExp: 'Tilgang utløper',
         accessRenew: 'Tilgang kan fornyes til',
         accessRenewDelete: 'Fjern mulighet for fornyelse',
         birthdate: 'Fødselsdato',
-        canModifyFor: 'Passkeys kan endres for:',
+        canModifyFor: 'MFA kan endres for:',
         city: 'By',
         changePassword: 'Bytt passord',
         convertAccount: 'Endre konto',
-        convertAccountP1: `Denne kontoen kan endres til en Passkey-Only konto. Denne endringen 
-            sletter passordet og tillater kun innlogging med registrerte passkeys. Kun passkeys med 
-            ekstra brukerverifisering aksepteres. Disse er markert med et ekstra symbol bak 
+        convertAccountP1: `Denne kontoen kan endres til en Passkey-Only konto. Denne endringen
+            sletter passordet og tillater kun innlogging med registrerte passkeys. Kun passkeys med
+            ekstra brukerverifisering aksepteres. Disse er markert med et ekstra symbol bak
             passkey-navnet på 'MFA'-siden.`,
         country: 'Land',
         deleteAccount: {
             deleteAccount: 'Delete Account',
-            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To 
+            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To
                 confirm, please enter:`,
         },
         deviceId: 'ID',
         deviceName: 'Navn',
         devices: 'Enheter',
         devicesDesc: 'Enheter tilknyttet denne kontoen',
-        emailUpdateConfirm: `E-postadressen er ikke oppdatert ennå. En melding med 
-            bekreftelseslenke er sendt til den nye adressen. Oppdateringen må bekreftes via lenken. 
+        emailUpdateConfirm: `E-postadressen er ikke oppdatert ennå. En melding med
+            bekreftelseslenke er sendt til den nye adressen. Oppdateringen må bekreftes via lenken.
             Etter bekreftelse settes den nye adressen.`,
         emailVerified: 'E-post verifisert',
         familyName: 'Etternavn',
-        federatedConvertPassword1: `Dette er en tilknyttet konto. Det betyr at innlogging skjer via 
+        federatedConvertPassword1: `Dette er en tilknyttet konto. Det betyr at innlogging skjer via
             ekstern leverandør. Nåværende leverandør er:`,
-        federatedConvertPassword2: `Du kan be om tilbakestilling av passord via e-post. Dette vil 
-            legge til et lokalt passord til denne kontoen. Etterpå kan du logge inn enten med 
+        federatedConvertPassword2: `Du kan be om tilbakestilling av passord via e-post. Dette vil
+            legge til et lokalt passord til denne kontoen. Etterpå kan du logge inn enten med
             ekstern leverandør eller lokalt passord. Be om tilbakestilling av passord?`,
         generateRandom: 'Generert tilfeldig',
         givenName: 'Fornavn',
@@ -136,11 +136,11 @@ export const I18nNb: I18n = {
             preferredUsername: 'Preferred Username',
         },
         providerLink: 'Koble konto',
-        providerLinkDesc: `Denne kontoen kan kobles til en av følgende innloggingsleverandører. 
-            Etter aktivering blir du videresendt til leverandørens innloggingsside. Ved vellykket 
+        providerLinkDesc: `Denne kontoen kan kobles til en av følgende innloggingsleverandører.
+            Etter aktivering blir du videresendt til leverandørens innloggingsside. Ved vellykket
             innlogging og samsvarende e-postadresser kobles kontoen.`,
         providerUnlink: 'Fjern kobling',
-        providerUnlinkDesc: `Du kan kun fjerne koblingen til leverandøren hvis minst ett passord 
+        providerUnlinkDesc: `Du kan kun fjerne koblingen til leverandøren hvis minst ett passord
             eller en passkey er satt for denne kontoen.`,
         regDate: 'Registreringsdato',
         regIp: 'Registrert fra IP',
@@ -151,15 +151,15 @@ export const I18nNb: I18n = {
         userEnabled: 'Bruker aktivert',
         userExpiry: 'Bruker utløper',
         userVerifiedTooltip: 'Sikret med fingeravtrykk eller PIN',
-        webIdDesc: `Her kan du angi feltene som skal publiseres via din WebID. Dette er en 
-            funksjon som brukes av enkelte nettverk for desentraliserte pålogginger. Hvis du ikke 
+        webIdDesc: `Her kan du angi feltene som skal publiseres via din WebID. Dette er en
+            funksjon som brukes av enkelte nettverk for desentraliserte pålogginger. Hvis du ikke
             vet hva WebID er, trenger du sannsynligvis ikke å bruke det.`,
         webIdDescData: 'Du kan legge til egne data til din WebID i gyldig FOAF-vokabular:',
         webIdExpertMode: 'Aktiver ekspertmodus',
         zip: 'Postnummer',
     },
     authorize: {
-        clientForceMfa: `Denne påloggingen krever MFA for økt sikkerhet. For å få tilgang, må du 
+        clientForceMfa: `Denne påloggingen krever MFA for økt sikkerhet. For å få tilgang, må du
             logge inn på kontoen din og legge til minst én passkey.`,
         clientGroupPrefixForbidden: 'Manglende gruppetilhørighet for denne påloggingen',
         email: 'E-post',
@@ -167,13 +167,14 @@ export const I18nNb: I18n = {
         emailRequired: 'E-post er påkrevd',
         emailSentMsg: 'Hvis adressen din er registrert, er det sendt en melding',
         expectingPasskey: 'Forventer autentisering med passkey',
+        expectingOtp: 'Forventer autentisering med engangspassord',
         http429: 'For mange ugyldige forsøk. Sperret til:',
         invalidCredentials: 'Ugyldige påloggingsopplysninger',
         invalidKeyUsed: 'Ugyldig sikkerhetsnøkkel',
         login: 'Logg inn',
         mfaAck: 'Bekreftet',
         navigateToAccount: 'Account Dashboard',
-        needsUserUpdate: `Some information for this account is missing. You need to update these 
+        needsUserUpdate: `Some information for this account is missing. You need to update these
             values before you can proceed with the login.`,
         orLoginWith: 'eller logg inn med',
         password: 'Passord',
@@ -181,7 +182,7 @@ export const I18nNb: I18n = {
         passwordForgotten: 'Glemt passord?',
         passwordRequest: 'Be om tilbakestilling',
         passwordRequired: 'Passord er påkrevd',
-        passwordResetDesc: `Vennligst oppgi e-postadressen for å be om en tilbakestillingslenke for 
+        passwordResetDesc: `Vennligst oppgi e-postadressen for å be om en tilbakestillingslenke for
             passord. Hvis adressen finnes i databasen, vil en lenke bli sendt dit.`,
         passwordResetSuccess: 'Forespørsel mottatt. Dette vinduet kan nå lukkes.',
         requestExpires: 'Forespørselen utløper',
@@ -223,13 +224,24 @@ export const I18nNb: I18n = {
         cancel: 'Avbryt',
     },
     mfa: {
-        p1: `Hvis du ønsker å bruke flere systemer parallelt, som f.eks. Windows og Android, bør du 
-            registrere deg med Android først.`,
-        p2: `Android er plattformen som for øyeblikket støtter færrest funksjoner av den 
-            passordløse teknologien. Nøkler som registreres der, fungerer på andre enheter på samme 
-            måte. Dette gjelder imidlertid ikke omvendt.`,
-        p3: 'For more information, see',
-        docLinkText: 'the documentation about passkeys',
+        webauthn: {
+            title: 'Passkeys',
+            p1: `Hvis du ønsker å bruke flere systemer parallelt, som f.eks. Windows og Android, bør du
+                registrere deg med Android først.`,
+            p2: `Android er plattformen som for øyeblikket støtter færrest funksjoner av den
+                passordløse teknologien. Nøkler som registreres der, fungerer på andre enheter på samme
+                måte. Dette gjelder imidlertid ikke omvendt.`,
+            p3: 'For more information, see',
+            docLinkText: 'the documentation about passkeys',
+            unsupportedText:
+                'Your browser does not support Webauthn credentials and must be updated.',
+        },
+        otp: {
+            title: 'Engangspassord',
+            titleEmail: 'Email-based OTP',
+            activationCode: 'Please enter the OTP code that was sent to your email address.',
+            code: 'Engangspassord',
+        },
         errorReg: 'Feil ved oppstart av registrering',
         lastUsed: 'Sist brukt',
         noKey: 'Det er ikke registrert noen sikkerhetsnøkkel i denne lagringen ennå',
@@ -237,10 +249,13 @@ export const I18nNb: I18n = {
             'Før passkeys kan redigeres, må en av de eksisterende først verifiseres:',
         reAuthenticatePwd:
             'Før passkeys kan redigeres, er det nødvendig med en ny bekreftelse av passordet.',
+        reAuthenticateOtp:
+            'Før engangspassord kan redigeres, må en av de eksisterende først verifiseres:',
         register: 'Registrer',
         registerNew: 'Registrer ny nøkkel',
         registerd: 'Registrert',
         registerdKeys: 'Registrerte nøkler',
+        registerdOtps: 'Registrerte engangspassord',
         passkeyName: 'Passkey-navn',
         passkeyNameErr: '2 - 32 bokstaver, ingen spesialtegn',
         passwordInvalid: 'Ugyldig passord',
@@ -273,10 +288,10 @@ export const I18nNb: I18n = {
         fidoLink: 'https://fidoalliance.org/fido2',
         generate: 'Generer',
         newAccDesc1: 'Du har valget mellom to kontotyper: Passordløs eller tradisjonell passord.',
-        newAccDesc2: `Den passordløse kontotypen bør alltid foretrekkes. Den tilbyr en mye høyere 
-            sikkerhetsstandard enn tradisjonelle passord, samtidig som den gir en enklere og 
-            raskere pålogging. For å bruke denne typen konto, trengs det minst én passkey (f.eks. 
-            Yubikey, Apple Touch ID, Windows Hello, ...) som oppfyller FIDO2-standarden. For mer 
+        newAccDesc2: `Den passordløse kontotypen bør alltid foretrekkes. Den tilbyr en mye høyere
+            sikkerhetsstandard enn tradisjonelle passord, samtidig som den gir en enklere og
+            raskere pålogging. For å bruke denne typen konto, trengs det minst én passkey (f.eks.
+            Yubikey, Apple Touch ID, Windows Hello, ...) som oppfyller FIDO2-standarden. For mer
             informasjon, følg denne lenken: `,
         newAccount: 'Ny konto',
         passwordReset: 'Tilbakestill passord',
@@ -290,8 +305,8 @@ export const I18nNb: I18n = {
         success2: 'Du vil bli videresendt snart.',
         success3: 'Hvis du ikke blir videresendt, vennligst klikk her:',
         successPasskey1: 'Den nye passkeyen ble vellykket registrert.',
-        successPasskey2: `Vennligst logg inn direkte på kontoen din og registrer minst én annen 
-            backup passkey. En passordløs konto kan ikke bruke passordtilbakestilling via e-post i 
+        successPasskey2: `Vennligst logg inn direkte på kontoen din og registrer minst én annen
+            backup passkey. En passordløs konto kan ikke bruke passordtilbakestilling via e-post i
             tilfelle den nåværende passkeyen blir borte.`,
     },
     register: {
@@ -316,7 +331,7 @@ export const I18nNb: I18n = {
     },
     userRevoke: {
         title: 'Tilbakekalling av pålogginger',
-        desc1: `Alle pålogginger og økter for denne brukeren har blitt tilbakekalt så langt det er 
+        desc1: `Alle pålogginger og økter for denne brukeren har blitt tilbakekalt så langt det er
             mulig.`,
         desc2: 'Passord bør umiddelbart tilbakestilles!',
     },

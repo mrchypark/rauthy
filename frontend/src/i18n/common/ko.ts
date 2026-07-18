@@ -57,39 +57,39 @@ export const I18nKo: I18n = {
         accType: '계정 종류',
         accTypePasskeyText1:
             '이 계정은 현재 패스키 전용 계정입니다.\n비밀번호를 입력하지 않아도 됩니다.',
-        accTypePasskeyText2: `계정을 전환하고 비밀번호를 추가할 수 있습니다.\n하지만 이렇게 하면 새 기기를 
-            인증할 때마다 추가적으로 비밀번호 인증을 해야 됩니다.\n한 번도 비밀번호를 입력한 적이 없는 기기에서는 
+        accTypePasskeyText2: `계정을 전환하고 비밀번호를 추가할 수 있습니다.\n하지만 이렇게 하면 새 기기를
+            인증할 때마다 추가적으로 비밀번호 인증을 해야 됩니다.\n한 번도 비밀번호를 입력한 적이 없는 기기에서는
             바로 로그인할 수 없습니다.`,
         accTypePasskeyText3: '계정을 전환하고 비밀번호를 추가하겠습니까?',
         accessExp: '만료일',
         accessRenew: '접근 갱신 기한',
         accessRenewDelete: '갱신 비활성화',
         birthdate: '생년월일',
-        canModifyFor: 'Passkeys can be modified for:',
+        canModifyFor: 'MFA can be modified for:',
         city: '도시',
         changePassword: '비밀번호 변경',
         convertAccount: '계정 전환',
-        convertAccountP1: `계정을 패스키 전용 계정으로 전환할 수 있습니다.\n이 전환은 비밀번호를 삭제하며, 
+        convertAccountP1: `계정을 패스키 전용 계정으로 전환할 수 있습니다.\n이 전환은 비밀번호를 삭제하며,
             등록된 패스키를 사용해서만 로그인할 수 있습니다.\n추가적인 사용자 인증이 가능한 패스키만 허용됩니다.\n
             이러한 패스키는 'MFA' 페이지에서 패스키 이름 뒤에 있는 추가 기호로 식별할 수 있습니다.`,
         country: '국가',
         deleteAccount: {
             deleteAccount: 'Delete Account',
-            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To 
+            deleteAccountDesc: `CAUTION: The deletion of this account cannot be reverted! To
                 confirm, please enter:`,
         },
         deviceId: '아이디',
         deviceName: '이름',
         devices: '기기',
         devicesDesc: '이 계정에 연결된 기기',
-        emailUpdateConfirm: `이메일 주소가 아직 변경되지 않았습니다. 확인 링크가 포함된 메시지가 새 주소로 
+        emailUpdateConfirm: `이메일 주소가 아직 변경되지 않았습니다. 확인 링크가 포함된 메시지가 새 주소로
             전송되었습니다.\n메세지의 승인 링크를 클릭해야 합니다. 확인이 완료되면 새 주소로 변경됩니다.`,
         emailVerified: '이메일 인증',
         familyName: '성',
-        federatedConvertPassword1: `이 계정은 연결된 계정입니다. 즉, 외부 인증 공급자를 통해 로그인이 
+        federatedConvertPassword1: `이 계정은 연결된 계정입니다. 즉, 외부 인증 공급자를 통해 로그인이
             이루어집니다. 현재 공급자는 다음과 같습니다:`,
-        federatedConvertPassword2: `이메일을 통해 비밀번호 초기화를 요청할 수 있습니다.\n완료 후 이 계정에 
-            로컬 비밀번호가 추가되며, 외부 공급자 또는 로컬 비밀번호를 사용하여 로그인할 수 있습니다. 초기화를 
+        federatedConvertPassword2: `이메일을 통해 비밀번호 초기화를 요청할 수 있습니다.\n완료 후 이 계정에
+            로컬 비밀번호가 추가되며, 외부 공급자 또는 로컬 비밀번호를 사용하여 로그인할 수 있습니다. 초기화를
             요청하겠습니까?`,
         generateRandom: '무작위로 생성',
         givenName: '이름',
@@ -133,11 +133,11 @@ export const I18nKo: I18n = {
             preferredUsername: 'Preferred Username',
         },
         providerLink: '계정 연결',
-        providerLinkDesc: `이 계정은 다음 로그인 공급자 중 하나에 연결할 수 있습니다.\n 프로세스를 활성화하면 
-            선택한 공급자의 로그인 페이지로 리디렉션이 트리거됩니다. 로그인에 성공하고 이메일 주소가 일치하면 이 
+        providerLinkDesc: `이 계정은 다음 로그인 공급자 중 하나에 연결할 수 있습니다.\n 프로세스를 활성화하면
+            선택한 공급자의 로그인 페이지로 리디렉션이 트리거됩니다. 로그인에 성공하고 이메일 주소가 일치하면 이
             계정이 연결됩니다.`,
         providerUnlink: '연결 해제',
-        providerUnlinkDesc: `이 계정에 최소 하나 이상의 비밀번호 또는 패스키가 설정되어 있는 경우에만 공급자 
+        providerUnlinkDesc: `이 계정에 최소 하나 이상의 비밀번호 또는 패스키가 설정되어 있는 경우에만 공급자
             연결을 해제할 수 있습니다.`,
         regDate: '가입일',
         regIp: 'IP에서 가입',
@@ -148,14 +148,14 @@ export const I18nKo: I18n = {
         userEnabled: '사용자 활성화',
         userExpiry: '사용자 만료',
         userVerifiedTooltip: '지문 또는 PIN을 통해 보호',
-        webIdDesc: `WebID를 통해 게시되는 필드를 정의할 수 있습니다.\n이는 일부 네트워크에서 분산 로그인을 위해 
+        webIdDesc: `WebID를 통해 게시되는 필드를 정의할 수 있습니다.\n이는 일부 네트워크에서 분산 로그인을 위해
             사용하는 기능입니다. WebID가 무엇인지 모른다면 필요하지 않을 것입니다.`,
         webIdDescData: '유효한 FOAF 어휘로 자신의 데이터를 WebID에 추가할 수 있습니다:',
         webIdExpertMode: '전문가 모드 활성화',
         zip: '우편번호',
     },
     authorize: {
-        clientForceMfa: `이 로그인은 더 높은 수준의 보안을 위해서 MFA를 강제합니다.\n접근하려면, 계정에 
+        clientForceMfa: `이 로그인은 더 높은 수준의 보안을 위해서 MFA를 강제합니다.\n접근하려면, 계정에
             로그인하고 최소 하나 이상의 패스키를 추가해야 합니다.`,
         clientGroupPrefixForbidden: 'Missing group assignment for this login',
         email: '이메일',
@@ -163,13 +163,14 @@ export const I18nKo: I18n = {
         emailRequired: '이메일이 필요합니다.',
         emailSentMsg: '이메일로 메세지가 발송되었습니다.',
         expectingPasskey: 'MFA 기기를 통해 로그인해 주세요.',
+        expectingOtp: 'Expecting OTP Authentication.',
         http429: '유효하지 않은 입력이 너무 많습니다. 다음 시간 전까지 비활성화합니다:',
         invalidCredentials: '유효하지 않은 인증 정보입니다.',
         invalidKeyUsed: '유효하지 않은 키입니다.',
         login: '로그인',
         mfaAck: '확인되었습니다.',
         navigateToAccount: 'Account Dashboard',
-        needsUserUpdate: `Some information for this account is missing. You need to update these 
+        needsUserUpdate: `Some information for this account is missing. You need to update these
             values before you can proceed with the login.`,
         orLoginWith: '또는 다음으로 로그인',
         password: '비밀번호',
@@ -177,7 +178,7 @@ export const I18nKo: I18n = {
         passwordForgotten: '비밀번호를 잊으셨나요?',
         passwordRequest: '요청',
         passwordRequired: '비밀번호는 필수입니다.',
-        passwordResetDesc: `Please provide your E-Mail to request a password reset link. If your 
+        passwordResetDesc: `Please provide your E-Mail to request a password reset link. If your
             address exists in out database, you will receive a link via E-Mail.`,
         passwordResetSuccess: 'Request received. You can close this window now.',
         requestExpires: '만료일',
@@ -221,28 +222,42 @@ export const I18nKo: I18n = {
         cancel: '취소',
     },
     mfa: {
-        p1: '윈도우와 안드로이드 등 다양한 시스템에서 MFA를 사용하려면, 안드로이드에서 키를 등록하여야 합니다.',
-        p2: `안드로이드는 비밀번호 없이 인증하는 기술을 가장 적게 지원하는 플랫폼입니다. 안드로이드에서 등록한 키는 
-            다른 곳에서도 작동하지만, 그 반대로는 작동되지 않습니다.`,
-        p3: 'For more information, see',
+        webauthn: {
+            title: 'Passkeys',
+            p1: '윈도우와 안드로이드 등 다양한 시스템에서 MFA를 사용하려면, 안드로이드에서 키를 등록하여야 합니다.',
+            p2: `안드로이드는 비밀번호 없이 인증하는 기술을 가장 적게 지원하는 플랫폼입니다. 안드로이드에서 등록한 키는
+                다른 곳에서도 작동하지만, 그 반대로는 작동되지 않습니다.`,
+            p3: 'For more information, see',
+            docLinkText: 'the documentation about passkeys',
+            unsupportedText:
+                'Your browser does not support Webauthn credentials and must be updated.',
+        },
+        otp: {
+            title: 'One time password',
+            titleEmail: 'Email-based OTP',
+            activationCode: 'Please enter the OTP code that was sent to your email address.',
+            code: 'One Time Password',
+        },
         errorReg: '가입 절차 시작 중 오류 발생',
         lastUsed: '마지막 사용일',
         noKey: '이 슬롯에 등록된 보안 키가 없습니다.',
-        reAuthenticatePasskey: ` 'Before you can modify Passkeys, you need to authenticate with an 
+        reAuthenticatePasskey: ` 'Before you can modify Passkeys, you need to authenticate with an
             already registered one:'`,
         reAuthenticatePwd:
             'Before you can modify Passkeys, you need to re-authenticate with your password.',
+        reAuthenticateOtp:
+            'Before you can modify your MFA, you need to re-authenticate with an OTP:',
         register: '등록',
         registerNew: '새 키 등록',
         registerd: '등록일',
         registerdKeys: '등록된 키',
+        registerdOtps: 'Registered OTPs',
         passkeyName: '패스키 이름',
         passkeyNameErr: '특수문자를 제외한 2자에서 32자이어야 합니다.',
         passwordInvalid: 'Password Invalid',
         test: '테스트',
         testError: '테스트 시작 중 오류 발생',
         testSuccess: '테스트 성공',
-        docLinkText: 'the documentation about Passkeys',
     },
     pagination: {
         entries: '표시 개수',
@@ -268,10 +283,10 @@ export const I18nKo: I18n = {
         badFormat: '잘못된 형식',
         fidoLink: 'https://fidoalliance.org/fido2/?lang=ko',
         generate: '생성',
-        newAccDesc1: `계정 종류는 비밀번호가 없는 계정 또는 기존의 비밀번호가 있는 계정 중 하나를 선택할 수 
+        newAccDesc1: `계정 종류는 비밀번호가 없는 계정 또는 기존의 비밀번호가 있는 계정 중 하나를 선택할 수
             있습니다.`,
-        newAccDesc2: `비밀번호가 없는 계정은 더 강력한 보안 방법을 제공하기 때문에 항상 선호됩니다.\n이러한 
-            계정을 생성하려면 최소 하나의 패스키(Yubikey, Apple Touch ID, Windows Hello, ...)가 필요합니다. 
+        newAccDesc2: `비밀번호가 없는 계정은 더 강력한 보안 방법을 제공하기 때문에 항상 선호됩니다.\n이러한
+            계정을 생성하려면 최소 하나의 패스키(Yubikey, Apple Touch ID, Windows Hello, ...)가 필요합니다.
             기기가 FIDO2 표준을 지원해야 합니다.\n더 자세한 사항은 다음 링크를 참고해 주세요: `,
         newAccount: '새 계정',
         passwordReset: '비밀번호 초기화',
@@ -285,7 +300,7 @@ export const I18nKo: I18n = {
         success2: '곧 리다이렉트됩니다.',
         success3: '만약 리다이렉트가 되지 않으면, 여기를 클릭해 주세요:',
         successPasskey1: '새로운 패스키가 성공적으로 등록되었습니다.',
-        successPasskey2: `계정에 로그인하여 가능한 한 빨리 두 번째 백업 키를 등록해 주세요.\n패스키 전용 계정은 
+        successPasskey2: `계정에 로그인하여 가능한 한 빨리 두 번째 백업 키를 등록해 주세요.\n패스키 전용 계정은
             현재 패스키를 잃어버리면, 이메일을 통하여 비밀번호 초기화할 수 없습니다.`,
     },
     register: {
