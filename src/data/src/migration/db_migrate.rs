@@ -28,7 +28,7 @@ use crate::entity::refresh_tokens::RefreshToken;
 use crate::entity::refresh_tokens_devices::RefreshTokenDevice;
 use crate::entity::roles::Role;
 use crate::entity::scopes::Scope;
-use crate::entity::sessions::{Session, SessionState};
+use crate::entity::sessions::{MfaMethod, Session, SessionState};
 use crate::entity::theme::{ThemeCss, ThemeCssFull};
 use crate::entity::tos::ToS;
 use crate::entity::tos_user_accept::ToSUserAccept;
@@ -293,6 +293,11 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
                 roles: row.get("roles")?,
                 groups: row.get("groups")?,
                 is_mfa: row.get("is_mfa")?,
+                mfa_method: row
+                    .get::<_, String>("mfa_method")
+                    .ok()
+                    .and_then(|value| MfaMethod::from_str(&value).ok())
+                    .unwrap_or(MfaMethod::None),
                 state,
                 exp: row.get("exp")?,
                 last_seen: row.get("last_seen")?,

@@ -139,8 +139,9 @@ pub async fn get_authorize(
             && user.has_webauthn_enabled()
         {
             action = FrontendAction::MfaLogin(mfa_cookie.email);
-        } else if let Ok(mfa_cookie) =
-            OtpCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
+        } else if RauthyConfig::get().vars.otp.enable
+            && let Ok(mfa_cookie) =
+                OtpCookie::parse_validate(&ApiCookie::from_req(&req, COOKIE_MFA))
             && let Ok(user) = User::find_by_email(mfa_cookie.email.clone()).await
             && user.has_otp_enabled().await?
         {

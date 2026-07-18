@@ -1262,8 +1262,9 @@ pub async fn recent_passwords(
 pub async fn refresh_tokens(data_before: Vec<RefreshToken>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM refresh_tokens";
     let sql_2 = r#"
-INSERT INTO refresh_tokens (id, user_id, nbf, exp, scope, is_mfa, session_id, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
+INSERT INTO refresh_tokens
+(id, user_id, nbf, exp, scope, is_mfa, mfa_method, session_id, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1278,6 +1279,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                         b.exp,
                         b.scope,
                         b.is_mfa,
+                        b.mfa_method.as_str(),
                         b.session_id,
                         b.access_token_jti
                     ),
@@ -1296,6 +1298,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                     &b.exp,
                     &b.scope,
                     &b.is_mfa,
+                    &b.mfa_method.as_str(),
                     &b.session_id,
                     &b.access_token_jti,
                 ],
@@ -1419,8 +1422,8 @@ pub async fn sessions(data_before: Vec<Session>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM sessions";
     let sql_2 = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, state, exp, last_seen)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, state, exp, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1435,6 +1438,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                         b.roles,
                         b.groups,
                         b.is_mfa,
+                        b.mfa_method.as_str(),
                         b.state.as_str(),
                         b.exp,
                         b.last_seen
@@ -1454,6 +1458,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                     &b.roles,
                     &b.groups,
                     &b.is_mfa,
+                    &b.mfa_method.as_str(),
                     &b.state.as_str(),
                     &b.exp,
                     &b.last_seen,

@@ -13,7 +13,9 @@ use rauthy_data::entity::auth_providers::{
     ProviderMfaLogin,
 };
 use rauthy_data::entity::clients::Client;
+use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::sessions::Session;
+use rauthy_data::rauthy_config::RauthyConfig;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use tracing::error;
 
@@ -99,10 +101,12 @@ pub async fn login_finish<'a>(
     // From here on, we deal with a normal login instead of just an account federation.
 
     let require_webauthn = user.has_webauthn_enabled();
-    let require_otp = user.has_otp_enabled().await?;
-    session
-        .set_mfa(provider_mfa_login == ProviderMfaLogin::Yes || require_webauthn || require_otp)
-        .await?;
+    let require_otp = RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?;
+    if provider_mfa_login == ProviderMfaLogin::Yes {
+        session.mfa_method = MfaMethod::Provider;
+        session.is_mfa = true;
+        session.upsert().await?;
+    }
 
     let client = Client::find_maybe_ephemeral(slf.req_client_id).await?;
     let header_origin = client.get_validated_origin_header(req)?;

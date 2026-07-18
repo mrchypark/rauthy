@@ -34,10 +34,62 @@ pub struct Session {
     pub groups: Option<String>,
     pub is_mfa: bool,
     #[column(parse)]
+    pub mfa_method: MfaMethod,
+    #[column(parse)]
     pub state: SessionState,
     pub exp: i64,
     pub last_seen: i64,
     pub remote_ip: Option<String>,
+}
+
+/// The MFA method actually verified for this session.
+///
+/// These values intentionally match the storage representation and the OIDC
+/// Authentication Method Reference vocabulary used during token issuance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MfaMethod {
+    #[default]
+    None,
+    WebAuthn,
+    Totp,
+    Provider,
+    /// A verified MFA ceremony from before method-level tracking existed.
+    Legacy,
+}
+
+impl MfaMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::WebAuthn => "webauthn",
+            Self::Totp => "totp",
+            Self::Provider => "provider",
+            Self::Legacy => "mfa",
+        }
+    }
+
+    pub const fn is_mfa(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+impl FromStr for MfaMethod {
+    type Err = ErrorResponse;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "webauthn" => Ok(Self::WebAuthn),
+            "totp" => Ok(Self::Totp),
+            "provider" => Ok(Self::Provider),
+            "mfa" => Ok(Self::Legacy),
+            _ => Err(ErrorResponse::new(
+                ErrorResponseType::Internal,
+                "invalid session MFA method",
+            )),
+        }
+    }
 }
 
 impl Debug for Session {
@@ -45,13 +97,14 @@ impl Debug for Session {
         write!(
             f,
             "Session {{ id: {}(...), csrf_token: {}(...), user_id: {:?}, roles: {:?}, groups: {:?}, \
-        is_mfa: {}, state: {}, exp: {}, last_seen: {}, remote_ip: {:?} }}",
+        is_mfa: {}, mfa_method: {}, state: {}, exp: {}, last_seen: {}, remote_ip: {:?} }}",
             &self.id[..5],
             &self.csrf_token[..5],
             self.user_id,
             self.roles,
             self.groups,
             self.is_mfa,
+            self.mfa_method.as_str(),
             self.state.as_str(),
             self.exp,
             self.last_seen,
@@ -366,11 +419,11 @@ OFFSET $3"#;
 
         let sql = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, state, exp, last_seen, remote_ip)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, state, exp, last_seen, remote_ip)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT(id) DO UPDATE
-SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, last_seen = $9,
-    remote_ip = $10"#;
+SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, state = $8, exp = $9,
+    last_seen = $10, remote_ip = $11"#;
 
         if is_hiqlite() {
             DB::hql()
@@ -383,6 +436,7 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, la
                         &self.roles,
                         &self.groups,
                         self.is_mfa,
+                        self.mfa_method.as_str(),
                         state_str,
                         self.exp,
                         self.last_seen,
@@ -400,6 +454,7 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, la
                     &self.roles,
                     &self.groups,
                     &self.is_mfa,
+                    &self.mfa_method.as_str(),
                     &state_str,
                     &self.exp,
                     &self.last_seen,
@@ -480,6 +535,7 @@ impl Session {
             roles: None,
             groups: None,
             is_mfa: false, // cannot be known during creation
+            mfa_method: MfaMethod::None,
             state: SessionState::Init,
             exp: now
                 .add(chrono::Duration::seconds(exp_in as i64))
@@ -528,6 +584,7 @@ impl Session {
             roles,
             groups,
             is_mfa: false, // cannot be known during creation
+            mfa_method: MfaMethod::None,
             state: SessionState::Init,
             exp,
             last_seen: now.timestamp(),
@@ -733,7 +790,24 @@ impl Session {
     #[inline]
     pub async fn set_mfa(&mut self, value: bool) -> Result<(), ErrorResponse> {
         self.is_mfa = value;
+        if !value {
+            self.mfa_method = MfaMethod::None;
+        } else if self.mfa_method == MfaMethod::None {
+            self.mfa_method = MfaMethod::Legacy;
+        }
         self.upsert().await
+    }
+
+    /// Marks a session authenticated only after the selected MFA ceremony succeeds.
+    pub async fn set_authenticated_with_mfa(
+        &mut self,
+        user: &User,
+        method: MfaMethod,
+    ) -> Result<(), ErrorResponse> {
+        debug_assert!(method.is_mfa());
+        self.mfa_method = method;
+        self.is_mfa = method.is_mfa();
+        self.set_authenticated(user).await
     }
 
     #[inline(always)]

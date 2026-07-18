@@ -1,4 +1,5 @@
 use crate::database::DB;
+use crate::entity::sessions::MfaMethod;
 use chrono::Utc;
 use hiqlite::macros::params;
 use rauthy_common::is_hiqlite;
@@ -15,6 +16,8 @@ pub struct RefreshToken {
     pub exp: i64,
     pub scope: Option<String>,
     pub is_mfa: bool,
+    #[column(parse)]
+    pub mfa_method: MfaMethod,
     pub session_id: Option<String>,
     pub access_token_jti: Option<String>,
 }
@@ -48,7 +51,7 @@ impl RefreshToken {
         // TODO should we even save mfa for refresh tokens?
         //  even if the original token has been issued with mfa, the refresh
         //  token not really is, because it can be given without user interaction.
-        is_mfa: bool,
+        mfa_method: MfaMethod,
         session_id: Option<String>,
         access_token_jti: Option<String>,
     ) -> Result<Self, ErrorResponse> {
@@ -58,7 +61,8 @@ impl RefreshToken {
             nbf,
             exp,
             scope,
-            is_mfa,
+            is_mfa: mfa_method.is_mfa(),
+            mfa_method,
             session_id,
             access_token_jti,
         };
@@ -170,10 +174,12 @@ impl RefreshToken {
 
     pub async fn save(&self) -> Result<(), ErrorResponse> {
         let sql = r#"
-INSERT INTO refresh_tokens (id, user_id, nbf, exp, scope, is_mfa, session_id, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO refresh_tokens
+(id, user_id, nbf, exp, scope, is_mfa, mfa_method, session_id, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT(id) DO UPDATE
-SET user_id = $2, nbf = $3, exp = $4, scope = $5, session_id = $7, access_token_jti = $8"#;
+SET user_id = $2, nbf = $3, exp = $4, scope = $5, is_mfa = $6, mfa_method = $7,
+    session_id = $8, access_token_jti = $9"#;
 
         if is_hiqlite() {
             DB::hql()
@@ -186,6 +192,7 @@ SET user_id = $2, nbf = $3, exp = $4, scope = $5, session_id = $7, access_token_
                         self.exp,
                         self.scope.clone(),
                         self.is_mfa,
+                        self.mfa_method.as_str(),
                         self.session_id.clone(),
                         self.access_token_jti.clone()
                     ),
@@ -201,6 +208,7 @@ SET user_id = $2, nbf = $3, exp = $4, scope = $5, session_id = $7, access_token_
                     &self.exp,
                     &self.scope,
                     &self.is_mfa,
+                    &self.mfa_method.as_str(),
                     &self.session_id,
                     &self.access_token_jti,
                 ],

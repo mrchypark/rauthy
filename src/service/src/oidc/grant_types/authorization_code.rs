@@ -14,6 +14,7 @@ use rauthy_data::entity::auth_codes::AuthCode;
 use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::clients_dyn::ClientDyn;
 use rauthy_data::entity::dpop_proof::DPoPProof;
+use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::user_login_states::UserLoginState;
 use rauthy_data::entity::users::User;
@@ -169,6 +170,15 @@ pub async fn grant_type_authorization_code(
     };
 
     let user = User::find(code.user_id.clone()).await?;
+    let mut session = if let Some(sid) = code.session_id.clone() {
+        Some(Session::find(sid).await?)
+    } else {
+        None
+    };
+    let mfa_method = session
+        .as_ref()
+        .map(|session| session.mfa_method)
+        .unwrap_or(MfaMethod::None);
     let token_set = TokenSet::from_user(
         &user,
         &client,
@@ -180,14 +190,14 @@ pub async fn grant_type_authorization_code(
         resource,
         AuthCodeFlow::Yes,
         DeviceCodeFlow::No,
+        mfa_method,
     )
     .await?;
 
     code.delete().await?;
 
     // update session metadata
-    if let Some(sid) = code.session_id.clone() {
-        let mut session = Session::find(sid).await?;
+    if let Some(mut session) = session.take() {
         session.set_authenticated(&user).await?;
     }
 

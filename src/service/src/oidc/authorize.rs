@@ -13,7 +13,7 @@ use rauthy_data::entity::browser_id::BrowserId;
 use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::cred_stuff_detect::CredStuffDetect;
 use rauthy_data::entity::login_locations::LoginLocation;
-use rauthy_data::entity::one_time_password::{OtpCookie, OtpLoginReq, OtpToSAwaitData};
+use rauthy_data::entity::one_time_password::{OtpLoginReq, OtpToSAwaitData};
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::users::{AccountType, User};
 use rauthy_data::entity::webauthn::{WebauthnCookie, WebauthnLoginReq, WebauthnToSAwaitData};
@@ -60,12 +60,8 @@ pub async fn post_authorize(
 
     // If a possibly existing mfa cookie does not match the given email, or the user
     // has webauthn or otp disabled in the meantime, ignore it
-    let has_mfa_cookie = if user.has_webauthn_enabled()
+    let has_passkey_cookie = if user.has_webauthn_enabled()
         && let Ok(c) = WebauthnCookie::parse_validate(&ApiCookie::from_req(req, COOKIE_MFA))
-    {
-        c.email == user.email
-    } else if user.has_otp_enabled().await.unwrap_or_default()
-        && let Ok(c) = OtpCookie::parse_validate(&ApiCookie::from_req(req, COOKIE_MFA))
     {
         c.email == user.email
     } else {
@@ -75,8 +71,11 @@ pub async fn post_authorize(
     let account_type = user.account_type();
 
     // Only allow an empty password, if the user has a passkey only account or a valid MFA cookie.
-    let user_must_provide_password =
-        req_data.password.is_none() && account_type != AccountType::Passkey && !has_mfa_cookie;
+    let user_must_provide_password = password_required(
+        account_type.clone(),
+        req_data.password.is_some(),
+        has_passkey_cookie,
+    );
     if user_must_provide_password {
         // if we get here, the UI did the first step from the login form
         // -> username only without password
@@ -134,10 +133,8 @@ pub async fn post_authorize(
 
     // Webauthn overrides otp
     let require_webauthn = user.has_webauthn_enabled();
-    let require_otp = !require_webauthn && user.has_otp_enabled().await?;
-    if require_webauthn || require_otp {
-        session.set_mfa(true).await?;
-    }
+    let require_otp =
+        RauthyConfig::get().vars.otp.enable && !require_webauthn && user.has_otp_enabled().await?;
 
     finish_authorize(
         user,
@@ -180,7 +177,8 @@ pub async fn post_authorize_refresh(
     // Webauthn overrides otp
     let require_webauthn =
         user.has_webauthn_enabled() && RauthyConfig::get().vars.lifetimes.session_renew_mfa;
-    let require_otp = !require_webauthn
+    let require_otp = RauthyConfig::get().vars.otp.enable
+        && !require_webauthn
         && user.has_otp_enabled().await?
         && RauthyConfig::get().vars.lifetimes.session_renew_mfa;
 
@@ -205,6 +203,14 @@ pub async fn post_authorize_refresh(
         None,
     )
     .await
+}
+
+fn password_required(
+    account_type: AccountType,
+    password_provided: bool,
+    has_passkey_cookie: bool,
+) -> bool {
+    !password_provided && account_type != AccountType::Passkey && !has_passkey_cookie
 }
 
 pub(crate) struct AuthorizeData {
@@ -378,5 +384,26 @@ pub(crate) async fn finish_authorize(
                 needs_user_update,
             }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::password_required;
+    use rauthy_data::entity::users::AccountType;
+
+    #[test]
+    fn password_account_requires_password_even_with_otp_challenge_cookie() {
+        assert!(password_required(AccountType::Password, false, false));
+    }
+
+    #[test]
+    fn passkey_account_keeps_passwordless_login() {
+        assert!(!password_required(AccountType::Passkey, false, false));
+    }
+
+    #[test]
+    fn password_account_can_continue_passwordless_only_for_passkey_challenge() {
+        assert!(!password_required(AccountType::Password, false, true));
     }
 }

@@ -13,6 +13,7 @@ use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::clients_dyn::ClientDyn;
 use rauthy_data::entity::dpop_proof::DPoPProof;
 use rauthy_data::entity::login_locations::LoginLocation;
+use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::user_login_states::UserLoginState;
 use rauthy_data::entity::users::User;
 use rauthy_data::events::event::Event;
@@ -120,6 +121,7 @@ pub async fn grant_type_password(
                 None,
                 AuthCodeFlow::No,
                 DeviceCodeFlow::No,
+                MfaMethod::None,
             )
             .await?;
 
