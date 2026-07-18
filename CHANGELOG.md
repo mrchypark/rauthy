@@ -1,5 +1,14 @@
 # Changelog
 
+## UNRELEASED
+
+### Changes
+
+#### Per-Client Favicons
+
+Client branding now supports a dedicated browser favicon for each client, independently of the
+login logo. Favicons can be uploaded, previewed, and removed from the Admin UI.
+
 ## v0.36.0
 
 ### Breaking

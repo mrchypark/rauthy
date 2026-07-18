@@ -49,6 +49,8 @@ export let I18nAdminEn: I18nAdmin = {
                 You can also use complex calculations or the above defined CSS variables.`,
             descVariables: `Each following label is at the same time the name of the CSS variable. This means,
                 that you can reference these in the free inputs, e.g. with <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Client favicon preview',
+            faviconUpload: 'Favicon Upload',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

@@ -49,6 +49,8 @@ export let I18nAdminZh: I18nAdmin = {
                 您也可以使用复杂计算或上面定义的CSS变量。`,
             descVariables: `每个标签同时也是CSS变量名。这意味着，
                 您可以在自由输入框中引用它们，例如<code>hsla(var(--action) / .7)</code>。`,
+            faviconPreviewAlt: '客户端网站图标预览',
+            faviconUpload: '上传网站图标',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

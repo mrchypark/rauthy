@@ -48,6 +48,8 @@ export let I18nAdminKo: I18nAdmin = {
                 정의된 <code>CSS 변수</code> 를 사용할 수도 있습니다.`,
             descVariables: `색상의 각 레이블들은 동시에 CSS 변수의 이름입니다. 즉, 입력 칸에서 이를 참조할 수
                 있습니다. (예: <code>hsla(var(--action) / .7)</code>)`,
+            faviconPreviewAlt: '클라이언트 파비콘 미리보기',
+            faviconUpload: '파비콘 업로드',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

@@ -51,6 +51,8 @@ export let I18nAdminUk: I18nAdmin = {
                 Ви також можете використовувати складні обчислення або визначені вище CSS-змінні.`,
             descVariables: `Кожна наступна мітка є водночас назвою CSS-змінної. Це означає,
                 що ви можете посилатися на них у довільних полях, наприклад: <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Попередній перегляд фавікона клієнта',
+            faviconUpload: 'Завантажити фавікон',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

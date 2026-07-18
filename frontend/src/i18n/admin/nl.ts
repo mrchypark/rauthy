@@ -53,6 +53,8 @@ export let I18nAdminNl: I18nAdmin = {
                 U kunt ook complexe berekeningen of de hierboven gedefinieerde CSS-variabelen gebruiken.`,
             descVariables: `Elk volgend label is tegelijkertijd de naam van de CSS-variabele. Dit betekent,
                 dat u er in de vrije invoervelden naar kunt verwijzen, bijv. met <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Voorbeeld van clientfavicon',
+            faviconUpload: 'Favicon uploaden',
         },
         claims: 'Custom claims (client_credentials)',
         claimsAtRoot: 'Emit claims at the token root',

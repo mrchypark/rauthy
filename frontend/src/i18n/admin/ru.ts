@@ -53,6 +53,8 @@ export let I18nAdminRu: I18nAdmin = {
                 Вы также можете использовать сложные вычисления или определённые выше CSS-переменные.`,
             descVariables: `Каждая следующая метка одновременно является именем CSS-переменной. Это означает,
                 что вы можете ссылаться на них в свободных полях ввода, например, с помощью <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Предварительный просмотр фавикона клиента',
+            faviconUpload: 'Загрузить фавикон',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

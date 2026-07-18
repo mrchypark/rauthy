@@ -46,6 +46,7 @@ impl HtmlTemplate {
                 Self::ClientLogoUpdated(Some(Utc::now().timestamp_millis())),
                 None,
             )),
+            "tpl_client_favicon_updated" => Ok((Self::ClientFaviconUpdated(None), None)),
             "tpl_csrf_token" => {
                 if let Some(s) = session {
                     Ok((Self::CsrfToken(s.csrf_token), None))
