@@ -28,8 +28,9 @@ use rauthy_data::entity::issued_tokens::IssuedToken;
 use rauthy_data::entity::login_locations::LoginLocation;
 use rauthy_data::entity::mfa_mod_token::MfaModToken;
 use rauthy_data::entity::one_time_password::{
-    self, OneTimePassword, OtpAdditionalData, OtpKind, OtpServiceReq, TotpEnrollment,
+    self, OneTimePassword, OtpAdditionalData, OtpData, OtpKind, OtpServiceReq, TotpEnrollment,
 };
+use rauthy_data::entity::otp_verification::OtpVerificationAttempt;
 use rauthy_data::entity::password::PasswordPolicy;
 use rauthy_data::entity::pictures::{PICTURE_STORAGE_TYPE, PictureStorage, UserPicture};
 use rauthy_data::entity::pow::PowEntity;
@@ -56,6 +57,7 @@ use rauthy_data::rauthy_config::{RauthyConfig, UserValueConfigValue, VarsUserVal
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use rauthy_jwt::claims::{JwtCommonClaims, JwtTokenType};
 use rauthy_jwt::token::JwtToken;
+use rauthy_service::login_delay;
 use rauthy_service::oidc::helpers::get_bearer_token_from_header;
 use rauthy_service::oidc::logout;
 use rauthy_service::password_reset;
@@ -64,6 +66,7 @@ use spow::pow::Pow;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
 use tracing::{debug, error, info, warn};
 use validator::Validate;
@@ -1670,6 +1673,96 @@ pub async fn delete_user_otp(
     ))
 }
 
+async fn finish_otp_with_controls(
+    req: &HttpRequest,
+    browser_id: BrowserId,
+    session: Option<Session>,
+    payload: OtpAuthFinishRequest,
+    ip: IpAddr,
+) -> Result<HttpResponse, ErrorResponse> {
+    if let Some(consumed) = OtpVerificationAttempt::consumed(&payload.code).await? {
+        Event::otp_replay_rejected(&consumed.user_id, &consumed.kind, ip)
+            .send()
+            .await?;
+        return Err(ErrorResponse::new(
+            ErrorResponseType::BadRequest,
+            "OTP challenge was already consumed",
+        ));
+    }
+
+    let auth_data = OtpData::find(payload.code.clone()).await?;
+    let user_id = match &auth_data.data {
+        OtpAdditionalData::Login(data) => data.user_id.clone(),
+        OtpAdditionalData::Service(data) => data.user_id.clone(),
+        OtpAdditionalData::Test(user_id) => user_id.clone(),
+        OtpAdditionalData::LoginToSAwait(_) => {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "invalid OTP challenge state",
+            ));
+        }
+    };
+    let otp = OneTimePassword::find(&auth_data.otp_id).await?;
+    let kind = otp.kind.as_str();
+    OtpVerificationAttempt::ensure_identity_available(&user_id, ip).await?;
+    if let Err(err) = OtpVerificationAttempt::claim(&payload.code).await {
+        Event::otp_replay_rejected(&user_id, kind, ip)
+            .send()
+            .await?;
+        return Err(err);
+    }
+
+    let challenge = payload.code.clone();
+    match one_time_password::auth_finish(req, browser_id, session, payload).await {
+        Ok(data) => {
+            OtpVerificationAttempt::success(
+                &user_id,
+                ip,
+                &challenge,
+                kind,
+                RauthyConfig::get().vars.otp.exp as i64 * 60,
+            )
+            .await?;
+            Ok(data.into_response())
+        }
+        Err(err) => {
+            // A missing challenge means OTP proof succeeded and a later operation failed.
+            // Never count that as another verification failure.
+            if OtpData::find(challenge.clone()).await.is_err() {
+                OtpVerificationAttempt::success(
+                    &user_id,
+                    ip,
+                    &challenge,
+                    kind,
+                    RauthyConfig::get().vars.otp.exp as i64 * 60,
+                )
+                .await?;
+                return Err(err);
+            }
+
+            let is_replay = err.message.contains("already used");
+            let limit = OtpVerificationAttempt::record_failure(&user_id, ip, &challenge).await;
+            if is_replay {
+                Event::otp_replay_rejected(&user_id, kind, ip)
+                    .send()
+                    .await?;
+            } else {
+                Event::otp_verify_failed(&user_id, kind, ip).send().await?;
+            }
+            match limit {
+                Ok(()) => {
+                    OtpVerificationAttempt::release(&challenge).await?;
+                    Err(err)
+                }
+                Err(limit_err) => {
+                    auth_data.delete().await?;
+                    Err(limit_err)
+                }
+            }
+        }
+    }
+}
+
 /// Starts the authentication process with otp for this user
 ///
 /// **Permissions**
@@ -1745,6 +1838,7 @@ pub async fn post_otp_auth_start(
         }
     };
 
+    OtpVerificationAttempt::ensure_identity_available(&id, real_ip_from_req(&req)?).await?;
     one_time_password::auth_start(Some(id), &payload)
         .await
         .map(|res| HttpResponse::Ok().json(res))
@@ -1773,6 +1867,8 @@ pub async fn post_otp_auth_finish(
     principal: ReqPrincipal,
     Json(payload): Json<OtpAuthFinishRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let ip = real_ip_from_req(&req)?;
     if !&RauthyConfig::get().vars.otp.enable {
         warn!("Request to auth with an OTP but `otp.enable` is set to `false`");
         return Err(ErrorResponse::new(
@@ -1788,8 +1884,8 @@ pub async fn post_otp_auth_finish(
     // -> indirect validation through existing code.
 
     let principal = principal.into_inner();
-    let res = one_time_password::auth_finish(&req, browser_id, principal.session, payload).await?;
-    Ok(res.into_response())
+    let res = finish_otp_with_controls(&req, browser_id, principal.session, payload, ip).await;
+    login_delay::handle_login_delay(ip, start, res, false).await
 }
 
 /// Starts the authentication process using OTP for this user. This only works during
@@ -1860,6 +1956,8 @@ pub async fn post_otp_auth_finish_login(
     principal: ReqPrincipal,
     Json(payload): Json<OtpAuthFinishRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let ip = real_ip_from_req(&req)?;
     payload.validate()?;
 
     // We do not need to further validate the principal here.
@@ -1868,8 +1966,8 @@ pub async fn post_otp_auth_finish_login(
     // -> indirect validation through existing code.
 
     let principal = principal.into_inner();
-    let res = one_time_password::auth_finish(&req, browser_id, principal.session, payload).await?;
-    Ok(res.into_response())
+    let res = finish_otp_with_controls(&req, browser_id, principal.session, payload, ip).await;
+    login_delay::handle_login_delay(ip, start, res, false).await
 }
 
 /// Get all registered Webauthn Passkeys for a user
