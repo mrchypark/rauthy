@@ -69,6 +69,54 @@ where
         .collect::<Vec<_>>())
 }
 
+fn sqlite_column_exists(
+    conn: &rusqlite::Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, ErrorResponse> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn legacy_mfa_method(is_mfa: bool) -> MfaMethod {
+    if is_mfa {
+        MfaMethod::Legacy
+    } else {
+        MfaMethod::None
+    }
+}
+
+async fn pg_table_exists(cl: &tokio_postgres::Client, table: &str) -> Result<bool, ErrorResponse> {
+    Ok(cl
+        .query_one("SELECT to_regclass($1) IS NOT NULL", &[&table])
+        .await?
+        .get(0))
+}
+
+async fn pg_column_exists(
+    cl: &tokio_postgres::Client,
+    table: &str,
+    column: &str,
+) -> Result<bool, ErrorResponse> {
+    Ok(cl
+        .query_one(
+            r#"SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = $1 AND column_name = $2
+            )"#,
+            &[&table, &column],
+        )
+        .await?
+        .get(0))
+}
+
 /// Migrates `MIGRATE_DB_FROM` to current database
 ///
 /// Note: This uses `rusqlite` blocking calls, but we don't really care, since this function
@@ -200,12 +248,23 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
 
     // ONE TIME PASSWORD
     debug!("Migrating table: one_time_password");
-    let before = query_sqlite::<OneTimePassword>(&conn, "SELECT * FROM one_time_password").await?;
+    let before = if conn.table_exists(None, "one_time_password")? {
+        query_sqlite::<OneTimePassword>(&conn, "SELECT * FROM one_time_password").await?
+    } else {
+        Vec::new()
+    };
     inserts::one_time_password(before).await?;
 
     // REFRESH TOKENS
     debug!("Migrating table: refresh_tokens");
-    let before = query_sqlite::<RefreshToken>(&conn, "SELECT * FROM refresh_tokens").await?;
+    let query = if sqlite_column_exists(&conn, "refresh_tokens", "mfa_method")? {
+        "SELECT * FROM refresh_tokens"
+    } else {
+        r#"SELECT id, user_id, nbf, exp, scope, is_mfa,
+            CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
+            session_id, access_token_jti FROM refresh_tokens"#
+    };
+    let before = query_sqlite::<RefreshToken>(&conn, query).await?;
     inserts::refresh_tokens(before).await?;
 
     // ROLES
@@ -275,8 +334,13 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS DEVICES
     debug!("Migrating table: refresh_tokens_devices");
-    let before =
-        query_sqlite::<RefreshTokenDevice>(&conn, "SELECT * FROM refresh_tokens_devices").await?;
+    let query = if sqlite_column_exists(&conn, "refresh_tokens_devices", "mfa_method")? {
+        "SELECT * FROM refresh_tokens_devices"
+    } else {
+        r#"SELECT id, device_id, user_id, nbf, exp, scope,
+            'none' AS mfa_method, access_token_jti FROM refresh_tokens_devices"#
+    };
+    let before = query_sqlite::<RefreshTokenDevice>(&conn, query).await?;
     inserts::refresh_tokens_devices(before).await?;
 
     // SESSIONS
@@ -286,18 +350,19 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
         .query_map([], |row| {
             let state = SessionState::from_str(&row.get::<_, String>("state")?)
                 .unwrap_or(SessionState::Unknown);
+            let is_mfa = row.get("is_mfa")?;
             Ok(Session {
                 id: row.get("id")?,
                 csrf_token: row.get("csrf_token")?,
                 user_id: row.get("user_id")?,
                 roles: row.get("roles")?,
                 groups: row.get("groups")?,
-                is_mfa: row.get("is_mfa")?,
+                is_mfa,
                 mfa_method: row
                     .get::<_, String>("mfa_method")
                     .ok()
                     .and_then(|value| MfaMethod::from_str(&value).ok())
-                    .unwrap_or(MfaMethod::None),
+                    .unwrap_or_else(|| legacy_mfa_method(is_mfa)),
                 state,
                 exp: row.get("exp")?,
                 last_seen: row.get("last_seen")?,
@@ -771,12 +836,23 @@ pub async fn migrate_from_postgres() -> Result<(), ErrorResponse> {
 
     // ONE TIME PASSWORD
     debug!("Migrating table: one_time_password");
-    let before = DB::pg_query_map_with(&cl, "SELECT * FROM one_time_password", &[], 0).await?;
+    let before = if pg_table_exists(&cl, "one_time_password").await? {
+        DB::pg_query_map_with(&cl, "SELECT * FROM one_time_password", &[], 0).await?
+    } else {
+        Vec::new()
+    };
     inserts::one_time_password(before).await?;
 
     // REFRESH TOKENS
     debug!("Migrating table: refresh_tokens");
-    let before = DB::pg_query_map_with(&cl, "SELECT * FROM refresh_tokens", &[], 0).await?;
+    let query = if pg_column_exists(&cl, "refresh_tokens", "mfa_method").await? {
+        "SELECT * FROM refresh_tokens"
+    } else {
+        r#"SELECT id, user_id, nbf, exp, scope, is_mfa,
+            CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
+            session_id, access_token_jti FROM refresh_tokens"#
+    };
+    let before = DB::pg_query_map_with(&cl, query, &[], 0).await?;
     inserts::refresh_tokens(before).await?;
 
     // ROLES
@@ -821,12 +897,25 @@ pub async fn migrate_from_postgres() -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS DEVICES
     debug!("Migrating table: refresh_tokens_devices");
-    let before = DB::pg_query_map_with(&cl, "SELECT * FROM refresh_tokens_devices", &[], 0).await?;
+    let query = if pg_column_exists(&cl, "refresh_tokens_devices", "mfa_method").await? {
+        "SELECT * FROM refresh_tokens_devices"
+    } else {
+        r#"SELECT id, device_id, user_id, nbf, exp, scope,
+            'none' AS mfa_method, access_token_jti FROM refresh_tokens_devices"#
+    };
+    let before = DB::pg_query_map_with(&cl, query, &[], 0).await?;
     inserts::refresh_tokens_devices(before).await?;
 
     // SESSIONS
     debug!("Migrating table: sessions");
-    let before = DB::pg_query_map_with(&cl, "SELECT * FROM sessions", &[], 16).await?;
+    let query = if pg_column_exists(&cl, "sessions", "mfa_method").await? {
+        "SELECT * FROM sessions"
+    } else {
+        r#"SELECT id, csrf_token, user_id, roles, groups, is_mfa,
+            CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
+            state, exp, last_seen, remote_ip FROM sessions"#
+    };
+    let before = DB::pg_query_map_with(&cl, query, &[], 16).await?;
     inserts::sessions(before).await?;
 
     // USER LOGIN STATES
@@ -986,5 +1075,27 @@ fn check_feature_version_migrate(version: semver::Version) {
             "MIGRATE_DB_FROM can only be used within the same major and minor version. \
             Only a difference in patch level is allowed"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{legacy_mfa_method, sqlite_column_exists};
+    use crate::entity::sessions::MfaMethod;
+
+    #[test]
+    fn legacy_mfa_flag_maps_without_claiming_a_specific_factor() {
+        assert_eq!(legacy_mfa_method(true), MfaMethod::Legacy);
+        assert_eq!(legacy_mfa_method(false), MfaMethod::None);
+    }
+
+    #[test]
+    fn sqlite_column_inspection_handles_patch_level_schema_differences() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE sessions (id TEXT, is_mfa INTEGER)", [])
+            .unwrap();
+
+        assert!(sqlite_column_exists(&conn, "sessions", "is_mfa").unwrap());
+        assert!(!sqlite_column_exists(&conn, "sessions", "mfa_method").unwrap());
     }
 }
