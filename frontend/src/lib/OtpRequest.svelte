@@ -12,7 +12,6 @@
     import Input from './form/Input.svelte';
     import { TPL_OTP_LENGTH } from '$utils/constants';
     import Template from './Template.svelte';
-    import { PATTERN_OTP_CODE } from '$utils/patterns';
     import Form from './form/Form.svelte';
     import Button from './button/Button.svelte';
     import type { ActiveOtp } from '$api/types/authorize';
@@ -42,6 +41,8 @@
     let otpKind: undefined | OtpKind = $state();
 
     let otpSize = $state(6);
+    let codeSize = $derived(otpKind === 'time' ? 6 : otpSize);
+    let codePattern = $derived(`^[0-9]{${codeSize}}$`);
 
     let otpStartRes: undefined | OtpAuthStartResult = $state();
     let otpFinishRes: undefined | OtpAuthFinishResult = $state();
@@ -139,10 +140,10 @@
                                         name="otp"
                                         autocomplete="one-time-code"
                                         label={t.mfa.otp.code}
-                                        placeholder={'0'.repeat(otpSize)}
-                                        maxLength={otpSize}
-                                        minLength={otpSize}
-                                        pattern={PATTERN_OTP_CODE}
+                                        placeholder={'0'.repeat(codeSize)}
+                                        maxLength={codeSize}
+                                        minLength={codeSize}
+                                        pattern={codePattern}
                                         bind:isError={isInputError}
                                         required
                                     />

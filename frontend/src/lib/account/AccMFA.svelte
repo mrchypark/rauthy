@@ -18,7 +18,12 @@
     import Form from '$lib/form/Form.svelte';
     import IconArrowPathSquare from '$icons/IconArrowPathSquare.svelte';
     import Template from '$lib5/Template.svelte';
-    import { TPL_OTP_LENGTH, TPL_IS_OTP_ENABLED } from '$utils/constants';
+    import {
+        TPL_OTP_LENGTH,
+        TPL_IS_OTP_ENABLED,
+        TPL_IS_OTP_EMAIL_ENABLED,
+        TPL_IS_OTP_TIME_ENABLED,
+    } from '$utils/constants';
     import type { OtpResponse } from '$api/types/otp';
     import { otpActivate, otpDelete, otpRequest } from '$mfa/otp/mod';
     import type { MfaPurpose } from '$api/types/mfa';
@@ -67,6 +72,8 @@
     let enrollmentInterval: undefined | number;
 
     let isOtpEnabled = $state(false);
+    let isOtpEmailEnabled = $state(false);
+    let isOtpTimeEnabled = $state(false);
     let otpSize = $state(6);
     let otps: OtpResponse[] = $state([]);
     let otpKind: OtpKind = $state('email');
@@ -93,6 +100,11 @@
             otps = [];
             cancelOtpEnrollment();
         }
+    });
+
+    $effect(() => {
+        if (!isOtpEmailEnabled && isOtpTimeEnabled) otpKind = 'time';
+        if (isOtpEmailEnabled && !isOtpTimeEnabled) otpKind = 'email';
     });
 
     $effect(() => {
@@ -219,7 +231,13 @@
     async function handleCreateOtp(_form: HTMLFormElement, params: URLSearchParams) {
         resetMsgErr();
         let kind = params.get('otp-kind');
-        if (isInputError || !userId || (kind !== 'email' && kind !== 'time')) {
+        if (
+            isInputError ||
+            !userId ||
+            (kind !== 'email' && kind !== 'time') ||
+            (kind === 'email' && !isOtpEmailEnabled) ||
+            (kind === 'time' && !isOtpTimeEnabled)
+        ) {
             return;
         }
 
@@ -422,6 +440,8 @@
 </script>
 
 <Template id={TPL_IS_OTP_ENABLED} bind:value={isOtpEnabled} />
+<Template id={TPL_IS_OTP_EMAIL_ENABLED} bind:value={isOtpEmailEnabled} />
+<Template id={TPL_IS_OTP_TIME_ENABLED} bind:value={isOtpTimeEnabled} />
 <Template id={TPL_OTP_LENGTH} bind:value={otpSize} />
 
 <div class="container">
@@ -570,20 +590,29 @@
             <Form action="" onSubmit={handleCreateOtp}>
                 <fieldset class="otpKinds">
                     <legend>{t.mfa.otp.chooseKind}</legend>
-                    <label>
-                        <input type="radio" name="otp-kind" value="email" bind:group={otpKind} />
-                        <span>
-                            <b>{t.mfa.otp.titleEmail}</b>
-                            <small>{t.mfa.otp.emailDescription}</small>
-                        </span>
-                    </label>
-                    <label>
-                        <input type="radio" name="otp-kind" value="time" bind:group={otpKind} />
-                        <span>
-                            <b>{t.mfa.otp.titleTime}</b>
-                            <small>{t.mfa.otp.timeDescription}</small>
-                        </span>
-                    </label>
+                    {#if isOtpEmailEnabled}
+                        <label>
+                            <input
+                                type="radio"
+                                name="otp-kind"
+                                value="email"
+                                bind:group={otpKind}
+                            />
+                            <span>
+                                <b>{t.mfa.otp.titleEmail}</b>
+                                <small>{t.mfa.otp.emailDescription}</small>
+                            </span>
+                        </label>
+                    {/if}
+                    {#if isOtpTimeEnabled}
+                        <label>
+                            <input type="radio" name="otp-kind" value="time" bind:group={otpKind} />
+                            <span>
+                                <b>{t.mfa.otp.titleTime}</b>
+                                <small>{t.mfa.otp.timeDescription}</small>
+                            </span>
+                        </label>
+                    {/if}
                 </fieldset>
                 <Input
                     name="otp-name"
@@ -607,7 +636,7 @@
                     >
                 </div>
             </Form>
-        {:else}
+        {:else if isOtpEmailEnabled || isOtpTimeEnabled}
             <div class="button">
                 <Button
                     level={hasOtp === false ? 1 : 2}
