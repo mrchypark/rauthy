@@ -242,7 +242,7 @@ impl DeviceAuthCode {
     pub async fn find(user_code: String) -> Result<Option<Self>, ErrorResponse> {
         let slf: Option<Self> = match DB::hql().get(Cache::DeviceCode, user_code.clone()).await {
             Ok(value) => value,
-            Err(err) => {
+            Err(hiqlite::Error::Bincode(err)) => {
                 warn!(
                     ?err,
                     "invalidating legacy in-flight device grant; client must restart"
@@ -250,6 +250,7 @@ impl DeviceAuthCode {
                 DB::hql().delete(Cache::DeviceCode, user_code).await?;
                 return Ok(None);
             }
+            Err(err) => return Err(err.into()),
         };
         match slf {
             None => Ok(None),
