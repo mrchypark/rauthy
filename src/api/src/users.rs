@@ -1530,17 +1530,16 @@ pub async fn activate_user_otp(
         )?;
         pending.ensure_attempts_available().await?;
         let secret = pending.secret()?;
-        let code_matches = match OneTimePassword::match_totp_step(
+        let matched_step = match OneTimePassword::match_totp_step(
             secret.as_slice(),
             &payload.otp_code,
             Utc::now().timestamp() as u64,
         ) {
-            Ok(Some(_)) => true,
-            Ok(None) => false,
-            Err(err) if err.error == ErrorResponseType::BadRequest => false,
+            Ok(step) => step,
+            Err(err) if err.error == ErrorResponseType::BadRequest => None,
             Err(err) => return Err(err),
         };
-        if !code_matches {
+        let Some(matched_step) = matched_step else {
             let attempt_result = pending.record_failure().await;
             Event::otp_verify_failed(&user_id, "time", ip)
                 .send()
@@ -1550,15 +1549,20 @@ pub async fn activate_user_otp(
                 ErrorResponseType::BadRequest,
                 "code is incorrect",
             ));
-        }
+        };
         if let Err(err) = pending.claim_once().await {
             Event::otp_replay_rejected(&user_id, "time", ip)
                 .send()
                 .await?;
             return Err(err);
         }
-        OneTimePassword::create_totp(user_id.clone(), pending.name.clone(), secret.as_slice())
-            .await?;
+        OneTimePassword::create_totp(
+            user_id.clone(),
+            pending.name.clone(),
+            secret.as_slice(),
+            matched_step,
+        )
+        .await?;
         pending.delete().await?;
         Event::otp_enrollment(&user_id, "time", ip).send().await?;
         return Ok(HttpResponse::Ok().finish());
@@ -1647,13 +1651,13 @@ pub async fn delete_user_otp(
     }
 
     if let Ok(otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
+        Session::invalidate_for_user(&user_id).await?;
+        RefreshToken::invalidate_for_user(&user_id).await?;
+        RefreshTokenDevice::invalidate_all_for_user(&user_id).await?;
+        IssuedToken::revoke_for_user(&user_id, true).await?;
+        logout::execute_backchannel_logout(None, Some(user_id.clone())).await?;
+        OneTimePassword::delete(&otp.id).await?;
         if is_admin_reset {
-            Session::invalidate_for_user(&user_id).await?;
-            RefreshToken::invalidate_for_user(&user_id).await?;
-            RefreshTokenDevice::invalidate_all_for_user(&user_id).await?;
-            IssuedToken::revoke_for_user(&user_id, true).await?;
-            logout::execute_backchannel_logout(None, Some(user_id.clone())).await?;
-            OneTimePassword::delete(&otp.id).await?;
             Event::otp_admin_reset(
                 &user_id,
                 otp.kind.as_str(),
@@ -1663,7 +1667,6 @@ pub async fn delete_user_otp(
             .send()
             .await?;
         } else {
-            OneTimePassword::delete(&otp.id).await?;
             Event::otp_deletion(&user_id, otp.kind.as_str(), ip)
                 .send()
                 .await?;
@@ -1700,7 +1703,13 @@ async fn finish_otp_with_controls(
         ));
     }
 
-    let auth_data = OtpData::find(payload.code.clone()).await?;
+    let auth_data = match OtpData::find(payload.code.clone()).await {
+        Ok(data) => data,
+        Err(err) => {
+            OtpVerificationAttempt::cleanup_unknown(&payload.code, ip).await?;
+            return Err(err);
+        }
+    };
     let user_id = match &auth_data.data {
         OtpAdditionalData::Login(data) => data.user_id.clone(),
         OtpAdditionalData::Service(data) => data.user_id.clone(),
@@ -1715,7 +1724,9 @@ async fn finish_otp_with_controls(
     let otp = OneTimePassword::find(&auth_data.otp_id).await?;
     let kind = otp.kind.as_str();
     OtpVerificationAttempt::ensure_identity_available(&user_id, ip).await?;
-    if let Err(err) = OtpVerificationAttempt::claim(&payload.code).await {
+    OtpVerificationAttempt::ensure_challenge_available(&payload.code).await?;
+    let ttl = RauthyConfig::get().vars.otp.exp as i64 * 60;
+    if let Err(err) = OtpVerificationAttempt::claim(&user_id, ip, &payload.code, ttl).await {
         Event::otp_replay_rejected(&user_id, kind, ip)
             .send()
             .await?;
@@ -1725,28 +1736,14 @@ async fn finish_otp_with_controls(
     let challenge = payload.code.clone();
     match one_time_password::auth_finish(req, browser_id, session, payload).await {
         Ok(data) => {
-            OtpVerificationAttempt::success(
-                &user_id,
-                ip,
-                &challenge,
-                kind,
-                RauthyConfig::get().vars.otp.exp as i64 * 60,
-            )
-            .await?;
+            OtpVerificationAttempt::success(&user_id, ip, &challenge, kind, ttl).await?;
             Ok(data.into_response())
         }
         Err(err) => {
             // A missing challenge means OTP proof succeeded and a later operation failed.
             // Never count that as another verification failure.
             if OtpData::find(challenge.clone()).await.is_err() {
-                OtpVerificationAttempt::success(
-                    &user_id,
-                    ip,
-                    &challenge,
-                    kind,
-                    RauthyConfig::get().vars.otp.exp as i64 * 60,
-                )
-                .await?;
+                OtpVerificationAttempt::success(&user_id, ip, &challenge, kind, ttl).await?;
                 return Err(err);
             }
 
@@ -1766,6 +1763,7 @@ async fn finish_otp_with_controls(
                 }
                 Err(limit_err) => {
                     auth_data.delete().await?;
+                    OtpVerificationAttempt::terminate(&user_id, ip, &challenge, kind, ttl).await?;
                     Err(limit_err)
                 }
             }

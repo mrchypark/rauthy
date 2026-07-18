@@ -5,6 +5,7 @@ use rauthy_common::utils::get_rand;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 const ENROLLMENT_TTL_SECS: i64 = 120;
@@ -64,6 +65,17 @@ impl PendingTotpEnrollment {
                 Some(ENROLLMENT_TTL_SECS),
             )
             .await?;
+        let attempts = self.attempts_idx();
+        let consumed = self.consumed_idx();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(ENROLLMENT_TTL_SECS as u64)).await;
+            let _ = DB::hql()
+                .counter_del(Cache::OneTimePassword, attempts)
+                .await;
+            let _ = DB::hql()
+                .counter_del(Cache::OneTimePassword, consumed)
+                .await;
+        });
         Ok(())
     }
 
