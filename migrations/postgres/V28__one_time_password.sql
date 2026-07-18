@@ -8,10 +8,15 @@ create table one_time_password
             on update cascade on delete cascade,
     name        varchar    null,
     secret      bytea    not null,
+    enc_key_id  varchar  not null,
     last_used   bigint not null,
-    kind        varchar    not null,
+    last_used_step bigint not null default 0,
+    kind        varchar    not null check (kind in ('email', 'time')),
     is_active   boolean default false not null
 );
 
-create index one_time_password_kind_index
-    on one_time_password (kind);
+create unique index one_time_password_user_kind_uindex
+    on one_time_password (user_id, kind);
+
+create index one_time_password_user_active_kind_index
+    on one_time_password (user_id, is_active, kind);

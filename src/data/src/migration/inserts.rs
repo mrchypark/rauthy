@@ -894,8 +894,8 @@ pub async fn one_time_password(data_before: Vec<OneTimePassword>) -> Result<(), 
     let sql_1 = "DELETE FROM one_time_password";
     let sql_2 = r#"
 INSERT INTO one_time_password
-(id, user_id, name, secret, last_used, kind, is_active)
-VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
+(id, user_id, name, secret, enc_key_id, last_used, last_used_step, kind, is_active)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -908,7 +908,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                         b.user_id,
                         b.name,
                         b.secret,
+                        b.enc_key_id,
                         b.last_used,
+                        b.last_used_step,
                         b.kind.as_str(),
                         b.is_active
                     ),
@@ -925,7 +927,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                     &b.user_id,
                     &b.name,
                     &b.secret,
+                    &b.enc_key_id,
                     &b.last_used,
+                    &b.last_used_step,
                     &b.kind.as_str(),
                     &b.is_active,
                 ],

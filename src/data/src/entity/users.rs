@@ -1795,7 +1795,7 @@ impl User {
     }
 
     pub async fn get_otp_kind(&self) -> Result<Vec<ActiveOtp>, ErrorResponse> {
-        Ok(OneTimePassword::find_for_user(&self.id)
+        Ok(OneTimePassword::find_active_for_user(&self.id)
             .await?
             .iter()
             .map(|f: &OneTimePassword| ActiveOtp {
@@ -1806,16 +1806,20 @@ impl User {
     }
 
     pub async fn has_otp_of_kind_enabled(&self, kind: &OtpKind) -> Result<bool, ErrorResponse> {
-        Ok(OneTimePassword::find_kind_for_user(kind, &self.id)
-            .await
-            .is_ok_and(|o| o.is_active))
+        if !kind.is_enabled() {
+            return Ok(false);
+        }
+        Ok(OneTimePassword::find_active_for_user(&self.id)
+            .await?
+            .iter()
+            .any(|otp| otp.kind == *kind))
     }
 
     #[inline(always)]
     pub async fn has_otp_enabled(&self) -> Result<bool, ErrorResponse> {
-        Ok(OneTimePassword::find_for_user(&self.id)
-            .await
-            .is_ok_and(|otps| otps.iter().any(|o| o.is_active)))
+        Ok(!OneTimePassword::find_active_for_user(&self.id)
+            .await?
+            .is_empty())
     }
 
     #[inline(always)]
