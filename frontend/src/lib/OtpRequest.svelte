@@ -48,6 +48,13 @@
     let otpFinishRes: undefined | OtpAuthFinishResult = $state();
 
     onMount(async () => {
+        if (
+            selectedOtpKind === 'time' &&
+            !activeOtps.some(otp => ('otp_kind' in otp ? otp.otp_kind : otp.kind) === 'time')
+        ) {
+            onError('No active authenticator app is available');
+            return;
+        }
         let selected = activeOtps.find(otp => {
             let id = 'otp_id' in otp ? otp.otp_id : otp.id;
             let kind = 'otp_kind' in otp ? otp.otp_kind : otp.kind;

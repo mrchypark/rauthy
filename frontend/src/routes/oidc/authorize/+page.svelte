@@ -54,6 +54,7 @@
     import OtpRequest from '$lib5/OtpRequest.svelte';
     import type { MfaPurpose } from '$api/types/mfa';
     import type { OtpAdditionalData } from '$mfa/otp/types';
+    import type { OtpKind } from '$api/types/otp';
 
     const inputWidth = '18rem';
 
@@ -88,6 +89,7 @@
     let mfaPurpose: undefined | MfaPurpose = $state();
     let mfaKind: undefined | 'webauthn' | 'otp' = $state();
     let activeOtps: undefined | ActiveOtp[] = $state();
+    let selectedLoginOtpKind: undefined | OtpKind = $state();
     let mfaChoices: undefined | MfaLoginMethod[] = $state();
 
     let isLoading = $state(false);
@@ -287,6 +289,10 @@
         }
 
         isLoading = true;
+
+        if (selectedMfa) {
+            selectedLoginOtpKind = selectedMfa === 'totp' ? 'time' : undefined;
+        }
 
         let pow = (await fetchSolvePow()) || '';
 
@@ -620,6 +626,7 @@
                     {:else if mfaKind == 'otp' && activeOtps}
                         <OtpRequest
                             {activeOtps}
+                            selectedOtpKind={selectedLoginOtpKind}
                             purpose={mfaPurpose}
                             onSuccess={onMfaSuccess}
                             onError={onMfaError}
