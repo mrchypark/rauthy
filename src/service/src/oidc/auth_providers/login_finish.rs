@@ -138,6 +138,7 @@ pub async fn login_finish<'a>(
             header_origin,
             require_webauthn,
             require_otp,
+            has_totp: false,
             mfa_method: require_webauthn.then_some(MfaLoginMethod::WebAuthn),
         },
         None,

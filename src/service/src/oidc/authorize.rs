@@ -13,7 +13,7 @@ use rauthy_data::entity::browser_id::BrowserId;
 use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::cred_stuff_detect::CredStuffDetect;
 use rauthy_data::entity::login_locations::LoginLocation;
-use rauthy_data::entity::one_time_password::{OtpLoginReq, OtpToSAwaitData};
+use rauthy_data::entity::one_time_password::{OtpKind, OtpLoginReq, OtpToSAwaitData};
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::users::{AccountType, User};
 use rauthy_data::entity::webauthn::{WebauthnCookie, WebauthnLoginReq, WebauthnToSAwaitData};
@@ -134,6 +134,7 @@ pub async fn post_authorize(
 
     let require_webauthn = user.has_webauthn_enabled();
     let require_otp = RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?;
+    let has_totp = require_otp && user.has_otp_of_kind_enabled(&OtpKind::Time).await?;
     let mfa_method = selected_mfa_method(req)?;
 
     finish_authorize(
@@ -151,6 +152,7 @@ pub async fn post_authorize(
             header_origin,
             require_webauthn,
             require_otp,
+            has_totp,
             mfa_method,
         },
         Some(user_needs_mfa),
@@ -201,6 +203,7 @@ pub async fn post_authorize_refresh(
             header_origin,
             require_webauthn,
             require_otp,
+            has_totp: false,
             mfa_method: require_webauthn.then_some(MfaLoginMethod::WebAuthn),
         },
         None,
@@ -228,6 +231,7 @@ pub(crate) struct AuthorizeData {
     pub header_origin: Option<(HeaderName, HeaderValue)>,
     pub require_webauthn: bool,
     pub require_otp: bool,
+    pub has_totp: bool,
     pub mfa_method: Option<MfaLoginMethod>,
 }
 
@@ -263,18 +267,23 @@ pub(crate) async fn finish_authorize(
 
     let scopes = client.sanitize_login_scopes(&data.scopes)?;
 
-    let (require_webauthn, require_otp) =
-        match resolve_mfa(data.require_webauthn, data.require_otp, data.mfa_method)? {
-            MfaDecision::Choice => {
-                return Ok(AuthStep::AwaitMfaChoice(AuthStepAwaitMfaChoice {
-                    header_csrf: Session::get_csrf_header(&session.csrf_token),
-                    header_origin: data.header_origin,
-                }));
-            }
-            MfaDecision::WebAuthn => (true, false),
-            MfaDecision::Totp => (false, true),
-            MfaDecision::None => (false, false),
-        };
+    let (require_webauthn, require_otp, totp_only) = match resolve_mfa(
+        data.require_webauthn,
+        data.require_otp,
+        data.has_totp,
+        data.mfa_method,
+    )? {
+        MfaDecision::Choice => {
+            return Ok(AuthStep::AwaitMfaChoice(AuthStepAwaitMfaChoice {
+                header_csrf: Session::get_csrf_header(&session.csrf_token),
+                header_origin: data.header_origin,
+            }));
+        }
+        MfaDecision::WebAuthn => (true, false, false),
+        MfaDecision::Otp => (false, true, false),
+        MfaDecision::Totp => (false, true, true),
+        MfaDecision::None => (false, false, false),
+    };
 
     let config = RauthyConfig::get();
     let mut code_lifetime = client.auth_code_lifetime;
@@ -342,12 +351,16 @@ pub(crate) async fn finish_authorize(
         Ok(AuthStep::AwaitWebauthn(step))
     } else if require_otp {
         // OneTimePassword enabled account
+        let mut active_otps = user.get_otp_kind().await?;
+        if totp_only {
+            active_otps.retain(|otp| otp.otp_kind == OtpKind::Time.as_str());
+        }
         let step = AuthStepAwaitOtp {
             code: get_rand(48),
             header_csrf: Session::get_csrf_header(&session.csrf_token),
             header_origin: data.header_origin,
             email: user.email.clone(),
-            active_otps: user.get_otp_kind().await?,
+            active_otps,
         };
 
         OtpLoginReq {
@@ -363,6 +376,7 @@ pub(crate) async fn finish_authorize(
                 auth_code_lifetime: client.auth_code_lifetime,
             }),
             needs_user_update,
+            otp_kind: totp_only.then_some(OtpKind::Time),
         }
         .save()
         .await?;
@@ -423,22 +437,25 @@ fn selected_mfa_method(req: &HttpRequest) -> Result<Option<MfaLoginMethod>, Erro
 enum MfaDecision {
     Choice,
     WebAuthn,
+    Otp,
     Totp,
     None,
 }
 
 fn resolve_mfa(
     has_webauthn: bool,
+    has_otp: bool,
     has_totp: bool,
     selected: Option<MfaLoginMethod>,
 ) -> Result<MfaDecision, ErrorResponse> {
-    match (has_webauthn, has_totp, selected) {
-        (true, true, None) => Ok(MfaDecision::Choice),
-        (true, _, Some(MfaLoginMethod::WebAuthn)) | (true, false, None) => {
+    match (has_webauthn, has_otp, has_totp, selected) {
+        (true, _, true, None) => Ok(MfaDecision::Choice),
+        (true, _, _, Some(MfaLoginMethod::WebAuthn)) | (true, _, false, None) => {
             Ok(MfaDecision::WebAuthn)
         }
-        (_, true, Some(MfaLoginMethod::Totp)) | (false, true, None) => Ok(MfaDecision::Totp),
-        (false, false, None) => Ok(MfaDecision::None),
+        (_, _, true, Some(MfaLoginMethod::Totp)) => Ok(MfaDecision::Totp),
+        (false, true, _, None) => Ok(MfaDecision::Otp),
+        (false, false, _, None) => Ok(MfaDecision::None),
         _ => Err(ErrorResponse::new(
             ErrorResponseType::BadRequest,
             "selected MFA method is not available",
@@ -469,24 +486,43 @@ mod tests {
 
     #[test]
     fn both_factors_require_an_explicit_choice() {
-        assert_eq!(resolve_mfa(true, true, None).unwrap(), MfaDecision::Choice);
+        assert_eq!(
+            resolve_mfa(true, true, true, None).unwrap(),
+            MfaDecision::Choice
+        );
     }
 
     #[test]
     fn both_factors_bind_the_challenge_to_the_selected_method() {
         assert_eq!(
-            resolve_mfa(true, true, Some(MfaLoginMethod::WebAuthn)).unwrap(),
+            resolve_mfa(true, true, true, Some(MfaLoginMethod::WebAuthn)).unwrap(),
             MfaDecision::WebAuthn
         );
         assert_eq!(
-            resolve_mfa(true, true, Some(MfaLoginMethod::Totp)).unwrap(),
+            resolve_mfa(true, true, true, Some(MfaLoginMethod::Totp)).unwrap(),
             MfaDecision::Totp
         );
     }
 
     #[test]
     fn unavailable_factor_selection_is_rejected() {
-        assert!(resolve_mfa(true, false, Some(MfaLoginMethod::Totp)).is_err());
-        assert!(resolve_mfa(false, true, Some(MfaLoginMethod::WebAuthn)).is_err());
+        assert!(resolve_mfa(true, true, false, Some(MfaLoginMethod::Totp)).is_err());
+        assert!(resolve_mfa(false, true, true, Some(MfaLoginMethod::WebAuthn)).is_err());
+    }
+
+    #[test]
+    fn passkey_and_email_only_preserve_passkey_precedence() {
+        assert_eq!(
+            resolve_mfa(true, true, false, None).unwrap(),
+            MfaDecision::WebAuthn
+        );
+    }
+
+    #[test]
+    fn passkey_email_and_time_offer_factor_choice() {
+        assert_eq!(
+            resolve_mfa(true, true, true, None).unwrap(),
+            MfaDecision::Choice
+        );
     }
 }

@@ -62,7 +62,9 @@ const TOTP_DIGITS: usize = 6;
 const TOTP_SKEW: u8 = 1;
 const TOTP_STEP_SECONDS: u64 = 30;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::EnumIter)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::EnumIter, ToSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum OtpKind {
     #[default]
@@ -857,6 +859,8 @@ pub struct OtpLoginReq {
     pub header_origin: Option<String>,
     pub tos_await_data: Option<OtpToSAwaitData>,
     pub needs_user_update: bool,
+    /// Restricts a factor-choice continuation to the selected OTP kind.
+    pub otp_kind: Option<OtpKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -954,12 +958,13 @@ pub async fn auth_start(
         ));
     }
     let is_test = matches!(&payload.purpose, MfaPurpose::Test);
-    let (add_data, user_id) = match &payload.purpose {
+    let (add_data, user_id, required_kind) = match &payload.purpose {
         MfaPurpose::Login(code) => {
             debug_assert!(user_id.is_none());
             let d = OtpLoginReq::find(code).await?;
             let user_id = d.user_id.clone();
-            (OtpAdditionalData::Login(d), user_id)
+            let required_kind = d.otp_kind;
+            (OtpAdditionalData::Login(d), user_id, required_kind)
         }
         MfaPurpose::MfaModToken
         | MfaPurpose::PamLogin
@@ -968,11 +973,11 @@ pub async fn auth_start(
             let user_id = user_id.expect("user_id should always exist for non-login otp starts");
             let svc_req = OtpServiceReq::new(user_id.clone());
             svc_req.save().await?;
-            (OtpAdditionalData::Service(svc_req), user_id)
+            (OtpAdditionalData::Service(svc_req), user_id, None)
         }
         MfaPurpose::Test => {
             let user_id = user_id.expect("user_id should always exist for non-login otp starts");
-            (OtpAdditionalData::Test(user_id.clone()), user_id)
+            (OtpAdditionalData::Test(user_id.clone()), user_id, None)
         }
     };
 
@@ -982,6 +987,12 @@ pub async fn auth_start(
         OneTimePassword::find_active_by_id_for_user(&payload.otp_id, &user_id).await?
     };
     if !otp.kind.is_enabled() {
+        return Err(ErrorResponse::new(
+            ErrorResponseType::NotFound,
+            "otp does not exist",
+        ));
+    }
+    if required_kind.is_some_and(|kind| kind != otp.kind) {
         return Err(ErrorResponse::new(
             ErrorResponseType::NotFound,
             "otp does not exist",
