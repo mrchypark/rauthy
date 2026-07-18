@@ -3,7 +3,7 @@ use actix_web::HttpRequest;
 use actix_web::http::header;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use chrono::Utc;
-use rauthy_api_types::oidc::{LoginRefreshRequest, LoginRequest};
+use rauthy_api_types::oidc::{LoginRefreshRequest, LoginRequest, MfaLoginMethod};
 use rauthy_common::constants::COOKIE_MFA;
 use rauthy_common::utils::{get_rand, real_ip_from_req};
 use rauthy_data::api_cookie::ApiCookie;
@@ -19,7 +19,8 @@ use rauthy_data::entity::users::{AccountType, User};
 use rauthy_data::entity::webauthn::{WebauthnCookie, WebauthnLoginReq, WebauthnToSAwaitData};
 use rauthy_data::rauthy_config::RauthyConfig;
 use rauthy_data::{
-    AuthStep, AuthStepAwaitOtp, AuthStepAwaitWebauthn, AuthStepLoggedIn, AwaitToSAccept,
+    AuthStep, AuthStepAwaitMfaChoice, AuthStepAwaitOtp, AuthStepAwaitWebauthn, AuthStepLoggedIn,
+    AwaitToSAccept,
 };
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use tracing::trace;
@@ -131,10 +132,9 @@ pub async fn post_authorize(
     let client = Client::find_maybe_ephemeral(req_data.client_id).await?;
     let header_origin = client.get_validated_origin_header(req)?;
 
-    // Webauthn overrides otp
     let require_webauthn = user.has_webauthn_enabled();
-    let require_otp =
-        RauthyConfig::get().vars.otp.enable && !require_webauthn && user.has_otp_enabled().await?;
+    let require_otp = RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?;
+    let mfa_method = selected_mfa_method(req)?;
 
     finish_authorize(
         user,
@@ -151,6 +151,7 @@ pub async fn post_authorize(
             header_origin,
             require_webauthn,
             require_otp,
+            mfa_method,
         },
         Some(user_needs_mfa),
         None,
@@ -174,13 +175,15 @@ pub async fn post_authorize_refresh(
     user.check_enabled()?;
     user.check_expired()?;
 
-    // Webauthn overrides otp
-    let require_webauthn =
-        user.has_webauthn_enabled() && RauthyConfig::get().vars.lifetimes.session_renew_mfa;
+    let renew_mfa = RauthyConfig::get().vars.lifetimes.session_renew_mfa
+        || (client.id != "rauthy" && client.force_mfa && !session.mfa_method.is_mfa());
+    // Preserve the existing refresh preference while making force_mfa impossible to bypass
+    // with an older password-only session.
+    let require_webauthn = user.has_webauthn_enabled() && renew_mfa;
     let require_otp = RauthyConfig::get().vars.otp.enable
         && !require_webauthn
         && user.has_otp_enabled().await?
-        && RauthyConfig::get().vars.lifetimes.session_renew_mfa;
+        && renew_mfa;
 
     finish_authorize(
         user,
@@ -198,6 +201,7 @@ pub async fn post_authorize_refresh(
             header_origin,
             require_webauthn,
             require_otp,
+            mfa_method: require_webauthn.then_some(MfaLoginMethod::WebAuthn),
         },
         None,
         None,
@@ -224,6 +228,7 @@ pub(crate) struct AuthorizeData {
     pub header_origin: Option<(HeaderName, HeaderValue)>,
     pub require_webauthn: bool,
     pub require_otp: bool,
+    pub mfa_method: Option<MfaLoginMethod>,
 }
 
 /// Expects the user checks already been done, but does all the necessary client validations.
@@ -258,12 +263,25 @@ pub(crate) async fn finish_authorize(
 
     let scopes = client.sanitize_login_scopes(&data.scopes)?;
 
+    let (require_webauthn, require_otp) =
+        match resolve_mfa(data.require_webauthn, data.require_otp, data.mfa_method)? {
+            MfaDecision::Choice => {
+                return Ok(AuthStep::AwaitMfaChoice(AuthStepAwaitMfaChoice {
+                    header_csrf: Session::get_csrf_header(&session.csrf_token),
+                    header_origin: data.header_origin,
+                }));
+            }
+            MfaDecision::WebAuthn => (true, false),
+            MfaDecision::Totp => (false, true),
+            MfaDecision::None => (false, false),
+        };
+
     let config = RauthyConfig::get();
     let mut code_lifetime = client.auth_code_lifetime;
-    if data.require_webauthn {
+    if require_webauthn {
         code_lifetime += config.vars.webauthn.req_exp as i32
     }
-    if data.require_otp {
+    if require_otp {
         code_lifetime += config.vars.otp.exp as i32 * 60
     }
     let need_tos_accept = user.needs_tos_update().await?;
@@ -292,7 +310,7 @@ pub(crate) async fn finish_authorize(
 
     // check if we need to validate the 2nd factor
     // if user.has_webauthn_enabled() && RauthyConfig::get().vars.lifetimes.session_renew_mfa {
-    if data.require_webauthn {
+    if require_webauthn {
         // Webauthn-enabled account
 
         let step = AuthStepAwaitWebauthn {
@@ -322,7 +340,7 @@ pub(crate) async fn finish_authorize(
         .await?;
 
         Ok(AuthStep::AwaitWebauthn(step))
-    } else if data.require_otp {
+    } else if require_otp {
         // OneTimePassword enabled account
         let step = AuthStepAwaitOtp {
             code: get_rand(48),
@@ -387,9 +405,51 @@ pub(crate) async fn finish_authorize(
     }
 }
 
+fn selected_mfa_method(req: &HttpRequest) -> Result<Option<MfaLoginMethod>, ErrorResponse> {
+    let Some(value) = req.headers().get("x-rauthy-mfa-method") else {
+        return Ok(None);
+    };
+    match value.to_str().unwrap_or_default() {
+        "webauthn" => Ok(Some(MfaLoginMethod::WebAuthn)),
+        "totp" => Ok(Some(MfaLoginMethod::Totp)),
+        _ => Err(ErrorResponse::new(
+            ErrorResponseType::BadRequest,
+            "invalid MFA method",
+        )),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum MfaDecision {
+    Choice,
+    WebAuthn,
+    Totp,
+    None,
+}
+
+fn resolve_mfa(
+    has_webauthn: bool,
+    has_totp: bool,
+    selected: Option<MfaLoginMethod>,
+) -> Result<MfaDecision, ErrorResponse> {
+    match (has_webauthn, has_totp, selected) {
+        (true, true, None) => Ok(MfaDecision::Choice),
+        (true, _, Some(MfaLoginMethod::WebAuthn)) | (true, false, None) => {
+            Ok(MfaDecision::WebAuthn)
+        }
+        (_, true, Some(MfaLoginMethod::Totp)) | (false, true, None) => Ok(MfaDecision::Totp),
+        (false, false, None) => Ok(MfaDecision::None),
+        _ => Err(ErrorResponse::new(
+            ErrorResponseType::BadRequest,
+            "selected MFA method is not available",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::password_required;
+    use super::{MfaDecision, password_required, resolve_mfa};
+    use rauthy_api_types::oidc::MfaLoginMethod;
     use rauthy_data::entity::users::AccountType;
 
     #[test]
@@ -405,5 +465,28 @@ mod tests {
     #[test]
     fn password_account_can_continue_passwordless_only_for_passkey_challenge() {
         assert!(!password_required(AccountType::Password, false, true));
+    }
+
+    #[test]
+    fn both_factors_require_an_explicit_choice() {
+        assert_eq!(resolve_mfa(true, true, None).unwrap(), MfaDecision::Choice);
+    }
+
+    #[test]
+    fn both_factors_bind_the_challenge_to_the_selected_method() {
+        assert_eq!(
+            resolve_mfa(true, true, Some(MfaLoginMethod::WebAuthn)).unwrap(),
+            MfaDecision::WebAuthn
+        );
+        assert_eq!(
+            resolve_mfa(true, true, Some(MfaLoginMethod::Totp)).unwrap(),
+            MfaDecision::Totp
+        );
+    }
+
+    #[test]
+    fn unavailable_factor_selection_is_rejected() {
+        assert!(resolve_mfa(true, false, Some(MfaLoginMethod::Totp)).is_err());
+        assert!(resolve_mfa(false, true, Some(MfaLoginMethod::WebAuthn)).is_err());
     }
 }

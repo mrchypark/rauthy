@@ -8,7 +8,6 @@ use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::dpop_proof::DPoPProof;
 use rauthy_data::entity::refresh_tokens::RefreshToken;
 use rauthy_data::entity::refresh_tokens_devices::RefreshTokenDevice;
-use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::users::User;
 use rauthy_data::events::event::Event;
 use rauthy_data::rauthy_config::RauthyConfig;
@@ -130,7 +129,7 @@ pub async fn validate_and_refresh_token(
             rt.exp = exp_at_secs;
             rt.save().await?;
         }
-        (rt.scope, MfaMethod::None)
+        (rt.scope, rt.mfa_method)
     } else {
         let mut rt = RefreshToken::find(validation_str).await?;
         if rt.exp > exp_at_secs + 1 {

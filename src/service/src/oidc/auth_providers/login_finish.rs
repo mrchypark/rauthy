@@ -3,6 +3,7 @@ use crate::oidc::authorize::AuthorizeData;
 use actix_web::HttpRequest;
 use actix_web::cookie::Cookie;
 use rauthy_api_types::auth_providers::ProviderCallbackRequest;
+use rauthy_api_types::oidc::MfaLoginMethod;
 use rauthy_common::constants::{COOKIE_UPSTREAM_CALLBACK, PROVIDER_ATPROTO, PROVIDER_LINK_COOKIE};
 use rauthy_common::sha256;
 use rauthy_common::utils::base64_url_encode;
@@ -128,6 +129,7 @@ pub async fn login_finish<'a>(
             header_origin,
             require_webauthn,
             require_otp,
+            mfa_method: require_webauthn.then_some(MfaLoginMethod::WebAuthn),
         },
         None,
         Some(provider_mfa_login),

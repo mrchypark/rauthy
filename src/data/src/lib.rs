@@ -24,7 +24,13 @@ pub enum AuthStep {
     AwaitToSAccept(AwaitToSAccept),
     AwaitWebauthn(AuthStepAwaitWebauthn),
     AwaitOtpCode(AuthStepAwaitOtp),
+    AwaitMfaChoice(AuthStepAwaitMfaChoice),
     ProviderLink,
+}
+
+pub struct AuthStepAwaitMfaChoice {
+    pub header_csrf: (HeaderName, HeaderValue),
+    pub header_origin: Option<(HeaderName, HeaderValue)>,
 }
 
 pub struct AuthStepLoggedIn {

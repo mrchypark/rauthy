@@ -544,6 +544,7 @@ impl TokenSet {
                 nbf,
                 exp,
                 scope.map(|s| s.0),
+                mfa_method,
                 Some(jti.0),
             )
             .await?;

@@ -143,6 +143,21 @@ pub struct LoginRequest {
     pub resource: Option<String>,
 }
 
+/// Explicit second-factor choices returned after password verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MfaLoginMethod {
+    WebAuthn,
+    Totp,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MfaChoiceResponse {
+    /// Resubmit the authorization request with a fresh proof-of-work and this
+    /// method in the `x-rauthy-mfa-method` header.
+    pub methods: Vec<MfaLoginMethod>,
+}
+
 #[derive(Deserialize, Validate, ToSchema)]
 pub struct LoginRefreshRequest {
     /// Validation: `^[a-zA-Z0-9,.:/_\-&?=~#!$'()*+%]{2,128}$`

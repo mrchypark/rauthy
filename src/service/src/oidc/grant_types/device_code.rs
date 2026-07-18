@@ -5,7 +5,6 @@ use rauthy_api_types::oidc::{OAuth2ErrorResponse, OAuth2ErrorTypeResponse, Token
 use rauthy_common::utils::new_store_id;
 use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::devices::{DeviceAuthCode, DeviceEntity};
-use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::users::User;
 use rauthy_data::events::event::Event;
 use rauthy_data::rauthy_config::RauthyConfig;
@@ -114,6 +113,18 @@ pub async fn grant_type_device_code(peer_ip: IpAddr, payload: TokenRequest) -> H
                 });
             }
         };
+        if let Err(err) = user
+            .check_enabled()
+            .and_then(|_| user.check_expired())
+            .and_then(|_| client.validate_user_groups(&user))
+            .and_then(|_| client.validate_mfa_method(code.mfa_method))
+        {
+            let _ = code.delete().await;
+            return HttpResponse::BadRequest().json(OAuth2ErrorResponse {
+                error: OAuth2ErrorTypeResponse::AccessDenied,
+                error_description: Some(Cow::from(err.to_string())),
+            });
+        }
 
         let access_exp = now.add(chrono::Duration::seconds(
             client.access_token_lifetime as i64,
@@ -168,7 +179,7 @@ pub async fn grant_type_device_code(peer_ip: IpAddr, payload: TokenRequest) -> H
             None,
             AuthCodeFlow::No,
             DeviceCodeFlow::Yes(id),
-            MfaMethod::None,
+            code.mfa_method,
         )
         .await
         {

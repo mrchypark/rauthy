@@ -1,5 +1,6 @@
 use crate::database::{Cache, DB};
 use crate::entity::refresh_tokens_devices::RefreshTokenDevice;
+use crate::entity::sessions::MfaMethod;
 use chrono::{DateTime, Utc};
 use hiqlite::macros::params;
 use rauthy_api_types::users::DeviceResponse;
@@ -173,6 +174,8 @@ pub struct DeviceAuthCode {
     pub device_code: String,
     /// Will be Some(user_id) once a user has been validated the auth request
     pub verified_by: Option<String>,
+    /// MFA proof copied from the browser session which approved this request.
+    pub mfa_method: MfaMethod,
     /// We need the additional `exp` here because a verification from a
     /// user will reset the lifetime, which means without the additional
     /// check here, it could be possible that a code lives longer than
@@ -205,6 +208,7 @@ impl DeviceAuthCode {
             client_id,
             device_code: get_rand(DEVICE_KEY_LENGTH as usize),
             verified_by: None,
+            mfa_method: MfaMethod::None,
             exp,
             last_poll: now,
             scopes,

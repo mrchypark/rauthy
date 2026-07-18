@@ -145,11 +145,11 @@ pub async fn get_forward_auth_client(
     user.check_enabled()?;
     user.check_expired()?;
     client.validate_user_groups(&user)?;
-    client.validate_mfa(&user, None).await?;
+    client.validate_mfa_method(session.mfa_method)?;
 
     let headers = &RauthyConfig::get().vars.auth_headers;
     if headers.enable {
-        let mfa_enabled = user.has_webauthn_enabled();
+        let mfa_enabled = mfa_header_value(session.mfa_method);
         let pref_username = if headers.enable_pref_username {
             UserValues::find_preferred_username(&user.id).await?
         } else {
@@ -261,12 +261,12 @@ pub async fn get_forward_auth_client_callback(
     user.check_enabled()?;
     user.check_expired()?;
     client.validate_user_groups(&user)?;
-    client.validate_mfa(&user, None).await?;
+    let mut session = Session::find(sid).await?;
+    client.validate_mfa_method(session.mfa_method)?;
 
     // all good
 
     // update session metadata
-    let mut session = Session::find(sid).await?;
     if session.state != SessionState::Auth {
         // A Session is only set to `SessionState::Auth` AFTER a successful and complete
         // auth code flow. Because of this, it is possible to get here with an `init` session.
@@ -398,5 +398,24 @@ fn validate_proxy(req: &HttpRequest) -> Result<(), ErrorResponse> {
             ErrorResponseType::Forbidden,
             "Invalid proxy peer IP",
         ))
+    }
+}
+
+#[inline]
+fn mfa_header_value(method: rauthy_data::entity::sessions::MfaMethod) -> bool {
+    method.is_mfa()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mfa_header_value;
+    use rauthy_data::entity::sessions::MfaMethod;
+
+    #[test]
+    fn forward_auth_header_reports_verified_session_proof() {
+        assert!(!mfa_header_value(MfaMethod::None));
+        assert!(mfa_header_value(MfaMethod::Totp));
+        assert!(mfa_header_value(MfaMethod::WebAuthn));
+        assert!(mfa_header_value(MfaMethod::Provider));
     }
 }

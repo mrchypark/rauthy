@@ -1319,8 +1319,8 @@ pub async fn refresh_tokens_devices(
     let sql_1 = "DELETE FROM refresh_tokens_devices";
     let sql_2 = r#"
 INSERT INTO refresh_tokens_devices
-(id, device_id, user_id, nbf, exp, scope, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
+(id, device_id, user_id, nbf, exp, scope, mfa_method, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1335,6 +1335,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                         b.nbf,
                         b.exp,
                         b.scope,
+                        b.mfa_method.as_str(),
                         b.access_token_jti
                     ),
                 )
@@ -1352,6 +1353,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                     &b.nbf,
                     &b.exp,
                     &b.scope,
+                    &b.mfa_method.as_str(),
                     &b.access_token_jti,
                 ],
             )

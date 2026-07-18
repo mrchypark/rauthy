@@ -7,6 +7,7 @@ use actix_web::http::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_METHODS, HeaderMap, HeaderValue,
 };
 use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder, web};
+use rauthy_api_types::oidc::{MfaChoiceResponse, MfaLoginMethod};
 use rauthy_api_types::tos::ToSAwaitLoginResponse;
 use rauthy_api_types::users::{OtpLoginResponse, WebauthnLoginResponse};
 use rauthy_common::constants::COOKIE_MFA;
@@ -216,6 +217,19 @@ pub async fn map_auth_step(
             Ok(builder.json(&OtpLoginResponse {
                 code: res.code,
                 active_otps: res.active_otps,
+            }))
+        }
+
+        AuthStep::AwaitMfaChoice(res) => {
+            let mut builder = HttpResponse::Ok();
+            builder
+                .insert_header(fed_cm_header)
+                .insert_header(res.header_csrf);
+            if let Some(origin) = res.header_origin {
+                builder.insert_header(origin);
+            }
+            Ok(builder.json(MfaChoiceResponse {
+                methods: vec![MfaLoginMethod::WebAuthn, MfaLoginMethod::Totp],
             }))
         }
 

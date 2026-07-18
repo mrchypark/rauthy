@@ -11,8 +11,8 @@ use chrono::Utc;
 use rauthy_api_types::oidc::{
     AuthRequest, CertsParams, DeviceAcceptedRequest, DeviceCodeResponse, DeviceGrantRequest,
     DeviceVerifyRequest, DeviceVerifyResponse, JWKSCerts, JWKSPublicKeyCerts, LoginRefreshRequest,
-    LoginRequest, LogoutRequest, OAuth2ErrorResponse, OAuth2ErrorTypeResponse, SessionInfoResponse,
-    TokenInfo, TokenRequest, TokenRevocationRequest, TokenValidationRequest,
+    LoginRequest, LogoutRequest, MfaChoiceResponse, OAuth2ErrorResponse, OAuth2ErrorTypeResponse,
+    SessionInfoResponse, TokenInfo, TokenRequest, TokenRevocationRequest, TokenValidationRequest,
 };
 use rauthy_api_types::sessions::SessionState;
 use rauthy_api_types::users::{OtpLoginResponse, Userinfo, WebauthnLoginResponse};
@@ -319,6 +319,7 @@ fn build_authorize_resp(
         (status = 200, description = "Correct credentials, but needs to continue with MFA Login (Webauthn or OTP)", content(
             (WebauthnLoginResponse = "application/webauthn+json"),
             (OtpLoginResponse = "application/otp+json"),
+            (MfaChoiceResponse = "application/json"),
         )),
         (status = 202, description = "Correct credentials and no MFA Login required, adds Location header"),
         (status = 400, description = "Missing / bad input data", body = ErrorResponse),
@@ -687,7 +688,11 @@ pub async fn post_device_verify(
 
     match payload.device_accepted {
         DeviceAcceptedRequest::Accept => {
+            let session = principal.get_session()?;
+            let client = Client::find(device_code.client_id.clone()).await?;
+            client.validate_mfa_method(session.mfa_method)?;
             device_code.verified_by = Some(principal.user_id()?.to_string());
+            device_code.mfa_method = session.mfa_method;
             device_code.save().await?;
             Ok(HttpResponse::Accepted().finish())
         }

@@ -4,6 +4,7 @@ use crate::entity::clients_dyn::ClientDyn;
 use crate::entity::clients_scim::ClientScim;
 use crate::entity::jwk::JwkKeyPairAlg;
 use crate::entity::scopes::Scope;
+use crate::entity::sessions::MfaMethod;
 use crate::entity::users::User;
 use crate::rauthy_config::RauthyConfig;
 use actix_web::HttpRequest;
@@ -1218,6 +1219,19 @@ impl Client {
         }
     }
 
+    /// Enforces `force_mfa` from proof recorded on the current session.
+    #[inline]
+    pub fn validate_mfa_method(&self, method: MfaMethod) -> Result<(), ErrorResponse> {
+        if self.id != "rauthy" && self.force_mfa && !method.is_mfa() {
+            Err(ErrorResponse::new(
+                ErrorResponseType::MfaRequired,
+                "MFA is required for this client",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     // Validates the `Origin` HTTP Header from an incoming request and compares it to the
     // `allowed_origins`. If the Origin is an external one and allowed by the config, it returns
     // the correct `ACCESS_CONTROL_ALLOW_ORIGIN` header which can then be inserted into the
@@ -2177,5 +2191,17 @@ mod tests {
         client.delete_scope("groups");
         assert_eq!(&client.scopes, "openid");
         assert_eq!(&client.default_scopes, "openid");
+    }
+
+    #[test]
+    fn force_mfa_accepts_only_a_verified_session_method() {
+        let mut client = Client::default();
+        client.id = "target-client".to_string();
+        client.force_mfa = true;
+
+        assert!(client.validate_mfa_method(MfaMethod::None).is_err());
+        assert!(client.validate_mfa_method(MfaMethod::Totp).is_ok());
+        assert!(client.validate_mfa_method(MfaMethod::WebAuthn).is_ok());
+        assert!(client.validate_mfa_method(MfaMethod::Provider).is_ok());
     }
 }
