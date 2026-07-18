@@ -1518,17 +1518,22 @@ pub async fn activate_user_otp(
         )?;
         pending.ensure_attempts_available().await?;
         let secret = pending.secret()?;
-        if OneTimePassword::match_totp_step(
+        let code_matches = match OneTimePassword::match_totp_step(
             secret.as_slice(),
             &payload.otp_code,
             Utc::now().timestamp() as u64,
-        )?
-        .is_none()
-        {
+        ) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(err) if err.error == ErrorResponseType::BadRequest => false,
+            Err(err) => return Err(err),
+        };
+        if !code_matches {
+            let attempt_result = pending.record_failure().await;
             Event::otp_verify_failed(&user_id, "time", ip)
                 .send()
                 .await?;
-            pending.record_failure().await?;
+            attempt_result?;
             return Err(ErrorResponse::new(
                 ErrorResponseType::BadRequest,
                 "code is incorrect",
