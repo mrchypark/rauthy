@@ -403,11 +403,36 @@ pub struct OtpGetResponse {
     pub is_active: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OtpKindRequest {
+    Email,
+    Time,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct TotpEnrollmentResponse {
+    pub enrollment_id: String,
+    pub secret_base32: String,
+    pub otpauth_uri: String,
+    /// Base64-encoded PNG bytes. Prefix with `data:image/png;base64,` for display.
+    pub qr_code_base64: String,
+    /// Unix timestamp in seconds.
+    pub expires_at: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct OtpCreateResponse {
+    pub otp: OtpGetResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrollment: Option<TotpEnrollmentResponse>,
+}
+
 #[derive(Deserialize, Validate, ToSchema)]
 #[cfg_attr(debug_assertions, derive(Serialize))]
 pub struct OtpCreateRequest {
     pub otp_name: Option<String>,
-    pub otp_kind: String,
+    pub otp_kind: OtpKindRequest,
     #[validate(length(min = 32, max = 32))]
     pub mfa_mod_token_id: String,
 }
@@ -415,6 +440,7 @@ pub struct OtpCreateRequest {
 #[derive(Deserialize, Validate, ToSchema)]
 #[cfg_attr(debug_assertions, derive(Serialize))]
 pub struct OtpActivateRequest {
+    /// OTP id for e-mail OTPs, enrollment id for TOTP.
     pub otp_id: String,
     pub otp_code: String,
     #[validate(length(min = 32, max = 32))]
@@ -704,4 +730,28 @@ pub struct WebauthnLoginFinishResponse {
 pub struct WebauthnLoginResponse {
     pub code: String,
     pub exp: u64,
+}
+
+#[cfg(test)]
+mod otp_tests {
+    use super::{OtpCreateRequest, OtpKindRequest};
+
+    fn request(kind: &str) -> String {
+        format!(r#"{{"otp_kind":"{kind}","mfa_mod_token_id":"12345678901234567890123456789012"}}"#)
+    }
+
+    #[test]
+    fn otp_kind_accepts_supported_kinds() {
+        let email: OtpCreateRequest = serde_json::from_str(&request("email")).unwrap();
+        let time: OtpCreateRequest = serde_json::from_str(&request("time")).unwrap();
+
+        assert_eq!(email.otp_kind, OtpKindRequest::Email);
+        assert_eq!(time.otp_kind, OtpKindRequest::Time);
+    }
+
+    #[test]
+    fn otp_kind_rejects_phone_and_unknown_values() {
+        assert!(serde_json::from_str::<OtpCreateRequest>(&request("phone")).is_err());
+        assert!(serde_json::from_str::<OtpCreateRequest>(&request("unknown")).is_err());
+    }
 }
