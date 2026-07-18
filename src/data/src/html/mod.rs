@@ -145,6 +145,14 @@ impl HtmlCached {
                         HtmlTemplate::UserValues,
                         HtmlTemplate::OtpLength(RauthyConfig::get().vars.otp.length),
                         HtmlTemplate::IsOtpEnabled(RauthyConfig::get().vars.otp.enable),
+                        HtmlTemplate::IsOtpEmailEnabled(
+                            RauthyConfig::get().vars.otp.enable
+                                && RauthyConfig::get().vars.otp.email.enable,
+                        ),
+                        HtmlTemplate::IsOtpTimeEnabled(
+                            RauthyConfig::get().vars.otp.enable
+                                && RauthyConfig::get().vars.otp.time.enable,
+                        ),
                     ],
                 )
             }

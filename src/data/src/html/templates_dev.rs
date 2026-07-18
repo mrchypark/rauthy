@@ -70,6 +70,19 @@ impl HtmlTemplate {
                 Self::IsOtpEnabled(RauthyConfig::get().vars.otp.enable),
                 None,
             )),
+            "tpl_is_otp_email_enabled" => Ok((
+                Self::IsOtpEmailEnabled(
+                    RauthyConfig::get().vars.otp.enable
+                        && RauthyConfig::get().vars.otp.email.enable,
+                ),
+                None,
+            )),
+            "tpl_is_otp_time_enabled" => Ok((
+                Self::IsOtpTimeEnabled(
+                    RauthyConfig::get().vars.otp.enable && RauthyConfig::get().vars.otp.time.enable,
+                ),
+                None,
+            )),
             "tpl_is_reg_open" => Ok((
                 Self::IsRegOpen(RauthyConfig::get().vars.user_registration.enable),
                 None,

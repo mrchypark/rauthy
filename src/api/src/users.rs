@@ -35,6 +35,7 @@ use rauthy_data::entity::password::PasswordPolicy;
 use rauthy_data::entity::pictures::{PICTURE_STORAGE_TYPE, PictureStorage, UserPicture};
 use rauthy_data::entity::pow::PowEntity;
 use rauthy_data::entity::refresh_tokens::RefreshToken;
+use rauthy_data::entity::refresh_tokens_devices::RefreshTokenDevice;
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::theme::ThemeCssFull;
 use rauthy_data::entity::tos::ToS;
@@ -766,29 +767,37 @@ pub async fn post_user_mfa_token(
             ));
         }
     } else if let Some(code) = payload.mfa_code {
-        if user.has_webauthn_enabled() {
-            let svc_req = WebauthnServiceReq::find(code).await?;
-            if svc_req.user_id != user.id {
-                return Err(ErrorResponse::new(
-                    ErrorResponseType::BadRequest,
-                    "mismatch in UserID",
-                ));
+        // WebAuthn and OTP service codes live in separate cache namespaces. Resolve the
+        // presented proof itself instead of preferring whichever factor is enrolled first.
+        match WebauthnServiceReq::find(code.clone()).await {
+            Ok(svc_req) => {
+                if svc_req.user_id != user.id {
+                    return Err(ErrorResponse::new(
+                        ErrorResponseType::BadRequest,
+                        "mismatch in UserID",
+                    ));
+                }
+                svc_req.delete().await?;
             }
-            svc_req.delete().await?;
-        } else if RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await? {
-            let svc_req = OtpServiceReq::find(code).await?;
-            if svc_req.user_id != user.id {
-                return Err(ErrorResponse::new(
-                    ErrorResponseType::BadRequest,
-                    "mismatch in UserID",
-                ));
-            }
-            svc_req.delete().await?;
-        } else {
-            return Err(ErrorResponse::new(
-                ErrorResponseType::BadRequest,
-                "must provide `password`",
-            ));
+            Err(err) if err.error != ErrorResponseType::NotFound => return Err(err),
+            Err(_) => match OtpServiceReq::find(code).await {
+                Ok(svc_req) => {
+                    if svc_req.user_id != user.id {
+                        return Err(ErrorResponse::new(
+                            ErrorResponseType::BadRequest,
+                            "mismatch in UserID",
+                        ));
+                    }
+                    svc_req.delete().await?;
+                }
+                Err(err) if err.error != ErrorResponseType::NotFound => return Err(err),
+                Err(_) => {
+                    return Err(ErrorResponse::new(
+                        ErrorResponseType::BadRequest,
+                        "invalid or expired `mfa_code`",
+                    ));
+                }
+            },
         }
     } else {
         return Err(ErrorResponse::new(
@@ -1641,6 +1650,7 @@ pub async fn delete_user_otp(
         if is_admin_reset {
             Session::invalidate_for_user(&user_id).await?;
             RefreshToken::invalidate_for_user(&user_id).await?;
+            RefreshTokenDevice::invalidate_all_for_user(&user_id).await?;
             IssuedToken::revoke_for_user(&user_id, true).await?;
             logout::execute_backchannel_logout(None, Some(user_id.clone())).await?;
             OneTimePassword::delete(&otp.id).await?;
