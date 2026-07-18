@@ -101,9 +101,14 @@ pub async fn login_finish<'a>(
 
     // From here on, we deal with a normal login instead of just an account federation.
 
-    let require_webauthn = user.has_webauthn_enabled();
-    let require_otp = RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?;
-    if provider_mfa_login == ProviderMfaLogin::Yes {
+    let provider_mfa_satisfied = provider_mfa_login == ProviderMfaLogin::Yes;
+    let (require_webauthn, may_require_otp) = local_factor_requirements(
+        provider_mfa_satisfied,
+        user.has_webauthn_enabled(),
+        RauthyConfig::get().vars.otp.enable,
+    );
+    let require_otp = may_require_otp && user.has_otp_enabled().await?;
+    if provider_mfa_satisfied {
         session.mfa_method = MfaMethod::Provider;
         session.is_mfa = true;
         session.upsert().await?;
@@ -140,4 +145,31 @@ pub async fn login_finish<'a>(
     let cookie = ApiCookie::build(COOKIE_UPSTREAM_CALLBACK, "", 0);
 
     Ok((auth_step, cookie, is_new_user))
+}
+
+fn local_factor_requirements(
+    provider_mfa_satisfied: bool,
+    has_webauthn: bool,
+    otp_enabled: bool,
+) -> (bool, bool) {
+    if provider_mfa_satisfied {
+        (false, false)
+    } else {
+        (has_webauthn, otp_enabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_factor_requirements;
+
+    #[test]
+    fn provider_mfa_completes_without_an_unusable_local_choice() {
+        assert_eq!(local_factor_requirements(true, true, true), (false, false));
+    }
+
+    #[test]
+    fn provider_without_mfa_preserves_local_passkey_precedence() {
+        assert_eq!(local_factor_requirements(false, true, true), (true, true));
+    }
 }
