@@ -22,6 +22,22 @@ fn extract_raw_claims(token: &str) -> Vec<u8> {
     base64_url_no_pad_decode(claims).unwrap()
 }
 
+fn image_form(bytes: &'static [u8], file_name: &'static str) -> reqwest::multipart::Form {
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(file_name)
+        .mime_str("image/png")
+        .unwrap();
+    reqwest::multipart::Form::new().part(file_name, part)
+}
+
+fn template_value<'a>(html: &'a str, id: &str) -> &'a str {
+    let start = format!(r#"<template id="{id}">"#);
+    html.split_once(&start)
+        .and_then(|(_, rest)| rest.split_once("</template>"))
+        .map(|(value, _)| value)
+        .unwrap_or_else(|| panic!("template {id} missing from authorize HTML"))
+}
+
 /// GETs the client, rebuilds the full `UpdateClientRequest` (so we don't depend
 /// on `JwkKeyPairAlg` being `Clone`), overrides `flows_enabled` + `claims`, PUTs
 /// it back and returns the response.
@@ -273,6 +289,149 @@ async fn test_clients() -> Result<(), Box<dyn Error>> {
 
     let clients = res.json::<Vec<ClientResponse>>().await?;
     assert_eq!(clients.len(), len_orig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_client_favicon_is_independent_from_logo() -> Result<(), Box<dyn Error>> {
+    const LOGO: &[u8] = include_bytes!("../../../assets/logo/rauthy_dark_small.png");
+    const FAVICON: &[u8] = include_bytes!("../../../assets/logo/rauthy_light_small.png");
+
+    let auth_headers = get_auth_headers().await?;
+    let backend_url = get_backend_url();
+    let client = reqwest::Client::new();
+    let client_id = "favicon_client";
+    let clients_url = format!("{backend_url}/clients");
+    let client_url = format!("{clients_url}/{client_id}");
+    let logo_url = format!("{client_url}/logo");
+    let favicon_url = format!("{client_url}/favicon");
+    let authorize_url = format!(
+        "{backend_url}/oidc/authorize?client_id={client_id}\
+         &redirect_uri=http://favicon.client.io/callback\
+         &response_type=code&code_challenge=test&code_challenge_method=S256"
+    );
+
+    // Allow a rerun after an interrupted test.
+    let _ = client
+        .delete(&favicon_url)
+        .headers(auth_headers.clone())
+        .send()
+        .await;
+    let _ = client
+        .delete(&client_url)
+        .headers(auth_headers.clone())
+        .send()
+        .await;
+
+    let new_client = NewClientRequest {
+        id: client_id.to_string(),
+        secret: None,
+        name: Some("Favicon Client".to_string()),
+        confidential: false,
+        redirect_uris: vec!["http://favicon.client.io/callback".to_string()],
+        post_logout_redirect_uris: None,
+    };
+    let res = client
+        .post(&clients_url)
+        .headers(auth_headers.clone())
+        .json(&new_client)
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
+
+    let res = client
+        .put(&favicon_url)
+        .multipart(image_form(FAVICON, "favicon.png"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), 401);
+
+    let res = client
+        .put(&logo_url)
+        .headers(auth_headers.clone())
+        .multipart(image_form(LOGO, "logo.png"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
+
+    let res = client.get(&authorize_url).send().await?;
+    assert_eq!(res.status(), 200);
+    let html = res.text().await?;
+    assert!(!template_value(&html, "tpl_client_logo_updated").is_empty());
+    assert!(template_value(&html, "tpl_client_favicon_updated").is_empty());
+
+    let res = client
+        .put(&favicon_url)
+        .headers(auth_headers.clone())
+        .multipart(image_form(FAVICON, "favicon.png"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
+
+    let res = client.get(&logo_url).send().await?;
+    assert_eq!(res.status(), 200);
+    let logo = res.bytes().await?;
+    assert!(!logo.is_empty());
+
+    let res = client.get(&favicon_url).send().await?;
+    assert_eq!(res.status(), 200);
+    let favicon = res.bytes().await?;
+    assert!(!favicon.is_empty());
+    assert_ne!(logo, favicon);
+
+    let res = client
+        .put(&favicon_url)
+        .headers(auth_headers.clone())
+        .multipart(image_form(b"not a png", "invalid.png"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), 400);
+
+    let res = client.get(&favicon_url).send().await?;
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.bytes().await?, favicon);
+
+    let res = client
+        .put(&favicon_url)
+        .headers(auth_headers.clone())
+        .multipart(reqwest::multipart::Form::new())
+        .send()
+        .await?;
+    assert_eq!(res.status(), 400);
+
+    let res = client.get(&authorize_url).send().await?;
+    assert_eq!(res.status(), 200);
+    let html = res.text().await?;
+    assert!(!template_value(&html, "tpl_client_logo_updated").is_empty());
+    assert!(!template_value(&html, "tpl_client_favicon_updated").is_empty());
+
+    let res = client
+        .delete(&favicon_url)
+        .headers(auth_headers.clone())
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
+
+    let res = client.get(&favicon_url).send().await?;
+    assert_eq!(res.status(), 404);
+
+    let res = client.get(&logo_url).send().await?;
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.bytes().await?, logo);
+
+    let res = client.get(&authorize_url).send().await?;
+    assert_eq!(res.status(), 200);
+    let html = res.text().await?;
+    assert!(!template_value(&html, "tpl_client_logo_updated").is_empty());
+    assert!(template_value(&html, "tpl_client_favicon_updated").is_empty());
+
+    let res = client
+        .delete(&client_url)
+        .headers(auth_headers)
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
 
     Ok(())
 }

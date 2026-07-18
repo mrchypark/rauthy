@@ -6,7 +6,7 @@ use hiqlite::macros::{FromRow, params};
 use image::imageops::FilterType;
 use image::{EncodableLayout, ImageFormat};
 use rauthy_common::constants::{
-    CACHE_TTL_APP, CONTENT_TYPE_WEBP, IDX_AUTH_PROVIDER_LOGO, IDX_CLIENT_LOGO,
+    CACHE_TTL_APP, CONTENT_TYPE_WEBP, IDX_AUTH_PROVIDER_LOGO, IDX_CLIENT_FAVICON, IDX_CLIENT_LOGO,
 };
 use rauthy_common::is_hiqlite;
 use rauthy_derive::FromPgRow;
@@ -18,6 +18,8 @@ use tracing::debug;
 
 // The default height a client logo will be resized to
 const RES_CLIENT_LOGO: u32 = 84;
+// The favicon size served on authorize pages
+const RES_CLIENT_FAVICON: u32 = 32;
 // The default height an auth provider logo will be resized to
 const RES_PROVIDER_LOGO: u32 = 20;
 // The default height for any logo how it will be saved for possible later use
@@ -61,6 +63,7 @@ impl LogoRes {
 #[derive(Debug, PartialEq)]
 pub enum LogoType {
     Client,
+    ClientFavicon,
     AuthProvider,
 }
 
@@ -79,6 +82,14 @@ impl Logo {
         match typ {
             LogoType::Client => {
                 let sql = "DELETE FROM client_logos WHERE client_id = $1";
+                if is_hiqlite() {
+                    DB::hql().execute(sql, params!(id)).await?;
+                } else {
+                    DB::pg_execute(sql, &[&id]).await?;
+                }
+            }
+            LogoType::ClientFavicon => {
+                let sql = "DELETE FROM client_favicons WHERE client_id = $1";
                 if is_hiqlite() {
                     DB::hql().execute(sql, params!(id)).await?;
                 } else {
@@ -136,9 +147,7 @@ impl Logo {
         content_type: String,
         typ: &LogoType,
     ) -> Result<(), ErrorResponse> {
-        Self::delete(&id, typ).await?;
-
-        // SVG's don't have a resolution, save them as they are
+        // SVG's don't have a resolution, sanitize and validate them before replacing an asset.
         let slf = Self {
             id,
             res: LogoRes::Svg,
@@ -146,36 +155,37 @@ impl Logo {
             data: Self::sanitize_svg(logo.as_mut_slice())?,
             updated: Utc::now().timestamp_millis(),
         };
+        Self::delete(&slf.id, typ).await?;
         slf.upsert_self(typ, true).await
     }
 
     async fn upsert_jpg_png(id: String, logo: Vec<u8>, typ: LogoType) -> Result<(), ErrorResponse> {
-        Self::delete(&id, &typ).await?;
-
         // we will save jpg / png in 2 downscaled and optimized resolutions:
         // - `RES_LATER_USE`px for possible later use
         // - smaller for the login page
-        let img = image::load_from_memory(&logo)?;
-        debug!(
-            "current logo width: {}, height: {}",
-            img.width(),
-            img.height()
-        );
-
-        // make sure the image is not too small
         let size_small = match &typ {
             LogoType::Client => RES_CLIENT_LOGO,
+            LogoType::ClientFavicon => RES_CLIENT_FAVICON,
             LogoType::AuthProvider => RES_PROVIDER_LOGO,
         };
-        if img.height() < size_small {
-            return Err(ErrorResponse::new(
-                ErrorResponseType::BadRequest,
-                format!("size must be at least {size_small} px"),
-            ));
-        }
 
-        // image resizing can be expensive -> do not block main thread
-        web::block(move || async move {
+        // Decode and resize before deleting the existing asset. Image processing can be expensive,
+        // so keep all of it off the main thread.
+        let (slf_medium, slf_small) = web::block(move || {
+            let img = image::load_from_memory(&logo)?;
+            debug!(
+                "current logo width: {}, height: {}",
+                img.width(),
+                img.height()
+            );
+
+            if img.height() < size_small {
+                return Err(ErrorResponse::new(
+                    ErrorResponseType::BadRequest,
+                    format!("size must be at least {size_small} px"),
+                ));
+            }
+
             let (image_medium, logo_res) = if img.height() < RES_LATER_USE
                 && img.width() < RES_LATER_USE
             {
@@ -189,34 +199,32 @@ impl Logo {
             let mut buf = Cursor::new(Vec::with_capacity(48 * 1024));
             image_medium.write_to(&mut buf, ImageFormat::WebP)?;
             let slf_medium = Self {
-                id,
+                id: id.clone(),
                 res: logo_res, // will not always be `Medium`, if the given size is smaller than that
                 content_type: CONTENT_TYPE_WEBP.to_string(),
                 data: buf.into_inner(),
                 updated: Utc::now().timestamp_millis(),
             };
-            slf_medium.upsert_self(&typ, false).await?;
 
             let img_small =
                 image_medium.resize_to_fill(size_small, size_small, FilterType::Lanczos3);
             let mut buf = Cursor::new(Vec::with_capacity(8 * 1024));
             img_small.write_to(&mut buf, ImageFormat::WebP)?;
-            Self {
-                id: slf_medium.id,
+            let slf_small = Self {
+                id,
                 res: LogoRes::Small,
-                content_type: slf_medium.content_type,
+                content_type: CONTENT_TYPE_WEBP.to_string(),
                 data: buf.into_inner(),
                 updated: Utc::now().timestamp_millis(),
-            }
-            .upsert_self(&typ, true)
-            .await?;
+            };
 
-            Ok::<(), ErrorResponse>(())
+            Ok::<(Self, Self), ErrorResponse>((slf_medium, slf_small))
         })
-        .await?
-        .await?;
+        .await??;
 
-        Ok(())
+        Self::delete(&slf_medium.id, &typ).await?;
+        slf_medium.upsert_self(&typ, false).await?;
+        slf_small.upsert_self(&typ, true).await
     }
 
     async fn upsert_self(&self, typ: &LogoType, with_cache: bool) -> Result<(), ErrorResponse> {
@@ -226,6 +234,13 @@ impl Logo {
             LogoType::Client => {
                 r#"
 INSERT INTO client_logos (client_id, res, content_type, data, updated)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT(client_id, res) DO UPDATE
+SET content_type = $3, data = $4, updated = $5"#
+            }
+            LogoType::ClientFavicon => {
+                r#"
+INSERT INTO client_favicons (client_id, res, content_type, data, updated)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT(client_id, res) DO UPDATE
 SET content_type = $3, data = $4, updated = $5"#
@@ -303,6 +318,12 @@ SELECT client_id AS id, res, content_type, data, updated
 FROM client_logos
 WHERE client_id = $1 AND (res = $2 OR res = $3)"#
             }
+            LogoType::ClientFavicon => {
+                r#"
+SELECT client_id AS id, res, content_type, data, updated
+FROM client_favicons
+WHERE client_id = $1 AND (res = $2 OR res = $3)"#
+            }
             LogoType::AuthProvider => {
                 r#"
 SELECT auth_provider_id AS id, res, content_type, data, updated
@@ -349,6 +370,9 @@ WHERE auth_provider_id = $1 AND (res = $2 OR res = $3)"#
 
         let sql = match typ {
             LogoType::Client => "SELECT updated FROM client_logos WHERE client_id = $1 LIMIT 1",
+            LogoType::ClientFavicon => {
+                "SELECT updated FROM client_favicons WHERE client_id = $1 LIMIT 1"
+            }
             LogoType::AuthProvider => {
                 "SELECT updated FROM auth_provider_logos WHERE auth_provider_id = $1 LIMIT 1"
             }
@@ -384,6 +408,7 @@ impl Logo {
     fn cache_idx(typ: &LogoType, id: &str) -> String {
         match typ {
             LogoType::Client => format!("{IDX_CLIENT_LOGO}_{id}"),
+            LogoType::ClientFavicon => format!("{IDX_CLIENT_FAVICON}_{id}"),
             LogoType::AuthProvider => format!("{IDX_AUTH_PROVIDER_LOGO}_{id}"),
         }
     }
@@ -392,6 +417,7 @@ impl Logo {
     fn cache_idx_updated(typ: &LogoType, id: &str) -> String {
         match typ {
             LogoType::Client => format!("{IDX_CLIENT_LOGO}_{id}_updated"),
+            LogoType::ClientFavicon => format!("{IDX_CLIENT_FAVICON}_{id}_updated"),
             LogoType::AuthProvider => format!("{IDX_AUTH_PROVIDER_LOGO}_{id}_updated"),
         }
     }

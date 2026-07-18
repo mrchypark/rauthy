@@ -7,6 +7,7 @@
     import {
         IS_DEV,
         TPL_AUTH_PROVIDERS,
+        TPL_CLIENT_FAVICON_UPDATED,
         TPL_CLIENT_LOGO_UPDATED,
         TPL_CLIENT_NAME,
         TPL_CLIENT_URL,
@@ -56,6 +57,7 @@
     let clientId = useParam('client_id').get();
     let clientName = $state('');
     // we can't use undefined to avoid a JSON error in the Template component
+    let clientFaviconUpdated = $state(-1);
     let clientLogoUpdated = $state(-1);
     let clientUri = $state(IS_DEV ? '/auth/v1' : '');
     let redirectUri = useParam('redirect_uri').get();
@@ -125,6 +127,24 @@
         ) {
             onRefresh();
         }
+    });
+
+    $effect(() => {
+        if (!Number.isFinite(clientFaviconUpdated) || clientFaviconUpdated < 0) {
+            return;
+        }
+
+        const favicon = document.head.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+        if (!favicon) {
+            return;
+        }
+
+        const defaultHref = favicon.href;
+        favicon.href = `/auth/v1/clients/${clientId}/favicon?updated=${clientFaviconUpdated}`;
+
+        return () => {
+            favicon.href = defaultHref;
+        };
     });
 
     $effect(() => {
@@ -502,15 +522,13 @@
 
 <svelte:head>
     <title>Login: {clientName || clientId}</title>
-    {#if clientLogoUpdated > -1}
-        <link rel="icon" href={`/auth/v1/clients/${clientId}/logo?updated=${clientLogoUpdated}`} />
-    {/if}
 </svelte:head>
 
 <Template id={TPL_AUTH_PROVIDERS} bind:value={providers} />
 <Template id={TPL_ATPROTO_ID} bind:value={atprotoId} />
 <Template id={TPL_CLIENT_NAME} bind:value={clientName} />
 <Template id={TPL_CLIENT_URL} bind:value={clientUri} />
+<Template id={TPL_CLIENT_FAVICON_UPDATED} bind:value={clientFaviconUpdated} />
 <Template id={TPL_CLIENT_LOGO_UPDATED} bind:value={clientLogoUpdated} />
 <Template id={TPL_CSRF_TOKEN} bind:value={csrfToken} />
 <Template id={TPL_LOGIN_ACTION} bind:value={loginAction} />
