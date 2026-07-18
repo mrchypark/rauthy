@@ -40,6 +40,7 @@ impl Debug for RefreshTokenDevice {
 
 // CRUD
 impl RefreshTokenDevice {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         id: String,
         device_id: String,
