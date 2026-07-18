@@ -1,5 +1,4 @@
 import { fetchDelete, fetchPost, fetchPut } from '$api/fetch';
-import type { OtpResponse } from '$api/types/otp';
 import type {
     OtpActivateRequest,
     OtpActivateResponse,
@@ -21,7 +20,7 @@ export async function otpRequest(
         otp_kind: kind,
         mfa_mod_token_id: mfaModTokenId,
     };
-    let res = await fetchPost<OtpResponse>(`/auth/v1/users/${userId}/otp`, payload);
+    let res = await fetchPost<OtpCreateResponse['data']>(`/auth/v1/users/${userId}/otp`, payload);
     if (res.error) {
         console.error(res.error);
         return {

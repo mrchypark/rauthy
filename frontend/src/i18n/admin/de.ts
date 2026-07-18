@@ -544,6 +544,10 @@ export let I18nAdminDe: I18nAdmin = {
                 mfaDelete2: `Vorsicht! Das Löschen eines Einmalpasswort <b>kann nicht rückgängig gemacht werden</b>, ohne
             dass der Benutzer die Registrierung erneut durchführt.`,
                 noMfaOtps: 'Dieser Benutzer hat keine registrierten Einmalpasswort.',
+                resetTitle: 'Reset this one-time password?',
+                resetConfirm:
+                    'This cannot be undone. The factor will be deleted and all existing sessions and tokens for this user will be revoked.',
+                resetButton: 'Delete and revoke sessions',
             },
             webauthn: {
                 title: 'Passkeys',

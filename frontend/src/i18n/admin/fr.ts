@@ -552,6 +552,10 @@ export let I18nAdminFr: I18nAdmin = {
                 mfaDelete2: `Attention ! La suppression d’un mot de passe à usage unique est irréversible ; l’utilisateur doit procéder à une
             nouvelle inscription complète.`,
                 noMfaOtps: 'Cet utilisateur n’a pas de mot de passe à usage unique',
+                resetTitle: 'Reset this one-time password?',
+                resetConfirm:
+                    'This cannot be undone. The factor will be deleted and all existing sessions and tokens for this user will be revoked.',
+                resetButton: 'Delete and revoke sessions',
             },
             webauthn: {
                 title: 'Clés d’accès',

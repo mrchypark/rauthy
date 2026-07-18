@@ -508,6 +508,10 @@ export let I18nAdminKo: I18nAdmin = {
                 mfaDelete2: `Caution! The deletion of an OTP <b>cannot be reverted</b> without the user
                     doing a fully new registration.`,
                 noMfaOtps: 'This user has no registered OTPs.',
+                resetTitle: '이 일회용 비밀번호를 재설정할까요?',
+                resetConfirm:
+                    '이 작업은 되돌릴 수 없습니다. 인증 수단이 삭제되고 사용자의 기존 세션과 토큰이 모두 폐기됩니다.',
+                resetButton: '삭제하고 세션 폐기',
             },
             webauthn: {
                 title: 'Passkeys',

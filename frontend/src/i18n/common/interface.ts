@@ -203,8 +203,25 @@ export interface I18n {
         otp: {
             title: string;
             titleEmail: string;
+            titleTime: string;
             activationCode: string;
             code: string;
+            chooseKind: string;
+            emailDescription: string;
+            timeDescription: string;
+            factorName: string;
+            factorNamePlaceholder: string;
+            timeSetup: string;
+            qrAlt: string;
+            manualSecret: string;
+            expiresIn: string;
+            expired: string;
+            registered: string;
+            verify: string;
+            continue: string;
+            unnamed: string;
+            loginEmail: string;
+            loginTime: string;
         };
 
         errorReg: string;

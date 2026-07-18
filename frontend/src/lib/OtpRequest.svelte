@@ -17,15 +17,20 @@
     import Button from './button/Button.svelte';
     import type { ActiveOtp } from '$api/types/authorize';
     import type { OtpResponse } from '$api/types/otp';
+    import type { OtpKind } from '$api/types/otp';
 
     let {
         activeOtps,
         purpose,
+        selectedOtpId,
+        selectedOtpKind,
         onError,
         onSuccess,
     }: {
         activeOtps: ActiveOtp[] | OtpResponse[];
         purpose: MfaPurpose;
+        selectedOtpId?: string;
+        selectedOtpKind?: OtpKind;
         onError: (error: string) => void;
         onSuccess: (res?: OtpAdditionalData) => void;
     } = $props();
@@ -33,21 +38,29 @@
     let t = useI18n();
     let refInput: undefined | HTMLInputElement = $state();
     let isInputError = $state(false);
+    let isFinishing = $state(false);
+    let otpKind: undefined | OtpKind = $state();
 
     let otpSize = $state(6);
 
     let otpStartRes: undefined | OtpAuthStartResult = $state();
     let otpFinishRes: undefined | OtpAuthFinishResult = $state();
 
-    // todo: The current implementation only allows one kind of OTP to be active, and the only kind is email.
-    // Since we could have multiple OTPs in the future, we should the allow users to select which OTP they want to use.
     onMount(async () => {
-        let otpId;
-        if ('otp_id' in activeOtps[0]) {
-            otpId = activeOtps[0].otp_id;
-        } else {
-            otpId = activeOtps[0].id.toString();
+        let selected = activeOtps.find(otp => {
+            let id = 'otp_id' in otp ? otp.otp_id : otp.id;
+            let kind = 'otp_kind' in otp ? otp.otp_kind : otp.kind;
+            return (
+                (!selectedOtpId || id === selectedOtpId) &&
+                (!selectedOtpKind || kind === selectedOtpKind)
+            );
+        });
+        if (!selected) {
+            onError('No matching one-time password method is available');
+            return;
         }
+        let otpId = 'otp_id' in selected ? selected.otp_id : selected.id;
+        otpKind = 'otp_kind' in selected ? selected.otp_kind : selected.kind;
         otpStartRes = await otpAuthStart(otpId, purpose);
     });
 
@@ -80,7 +93,9 @@
     async function onLoginOtpSubmit(_form: HTMLFormElement, params: URLSearchParams) {
         let otpCode = params.get('otp');
         if (otpStartRes && otpStartRes.data && otpCode) {
+            isFinishing = true;
             otpFinishRes = await otpAuthFinish(otpStartRes.data.code, otpCode);
+            isFinishing = false;
         }
     }
 </script>
@@ -113,6 +128,11 @@
                             </div>
                         {:else}
                             <div class="good">
+                                <p>
+                                    {otpKind === 'time'
+                                        ? t.mfa.otp.loginTime
+                                        : t.mfa.otp.loginEmail}
+                                </p>
                                 <Form action="" onSubmit={onLoginOtpSubmit}>
                                     <Input
                                         bind:ref={refInput}
@@ -124,8 +144,11 @@
                                         minLength={otpSize}
                                         pattern={PATTERN_OTP_CODE}
                                         bind:isError={isInputError}
+                                        required
                                     />
-                                    <Button type="submit">send</Button>
+                                    <Button type="submit" isLoading={isFinishing}
+                                        >{t.mfa.otp.verify}</Button
+                                    >
                                 </Form>
                             </div>
                         {/if}

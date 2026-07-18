@@ -536,6 +536,10 @@ export let I18nAdminNl: I18nAdmin = {
                 mfaDelete2: `Caution! The deletion of an OTP <b>cannot be reverted</b> without the user
                     doing a fully new registration.`,
                 noMfaOtps: 'This user has no registered OTPs.',
+                resetTitle: 'Reset this one-time password?',
+                resetConfirm:
+                    'This cannot be undone. The factor will be deleted and all existing sessions and tokens for this user will be revoked.',
+                resetButton: 'Delete and revoke sessions',
             },
             webauthn: {
                 title: 'Passkeys',

@@ -26,13 +26,12 @@
                 {#if otp.kind == 'email'}
                     {t.mfa.otp.titleEmail}
                 {:else}
-                    <!-- todo: implement other kind of otp -->
-                    Not implemented
+                    {t.mfa.otp.titleTime}
                 {/if}
             </span>
 
             <div class="name">
-                <b>{otp.name}</b>
+                <b>{otp.name || t.mfa.otp.unnamed}</b>
                 {#if otp.is_active}
                     <div style:margin-bottom="-.25rem">
                         <IconCheckBadge width="1rem" color="hsl(var(--accent))" />

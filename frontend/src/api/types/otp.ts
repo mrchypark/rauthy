@@ -1,8 +1,10 @@
+export type OtpKind = 'email' | 'time';
+
 export interface OtpResponse {
-    id: String;
-    name: String;
+    id: string;
+    name?: string;
     /// Unix timestamp in seconds
     last_used: number;
-    kind: String;
+    kind: OtpKind;
     is_active: boolean;
 }

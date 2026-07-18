@@ -19,11 +19,15 @@
     import IconArrowPathSquare from '$icons/IconArrowPathSquare.svelte';
     import Template from '$lib5/Template.svelte';
     import { TPL_OTP_LENGTH, TPL_IS_OTP_ENABLED } from '$utils/constants';
-    import type { _ } from '$env/static/private';
     import type { OtpResponse } from '$api/types/otp';
     import { otpActivate, otpDelete, otpRequest } from '$mfa/otp/mod';
     import type { MfaPurpose } from '$api/types/mfa';
-    import type { OtpAdditionalData, OtpKind, OtpServiceReq } from '$mfa/otp/types';
+    import type {
+        OtpAdditionalData,
+        OtpKind,
+        OtpServiceReq,
+        TotpEnrollmentResponse,
+    } from '$mfa/otp/types';
     import UserOtp from '$lib5/UserOtp.svelte';
     import OtpRequest from '$lib5/OtpRequest.svelte';
 
@@ -42,6 +46,7 @@
     let pwdErr = $state('');
     let msg = $state('');
     let showRegInput = $state(false);
+    let showOtpRegistration = $state(false);
     let showOtpInput = $state(false);
     let showDelete = $state(untrack(() => user.account_type) === 'password');
 
@@ -50,6 +55,7 @@
     let passkeyName = $state('');
     let isInputError = $state(false);
     let isLoading = $state(false);
+    let isOtpLoading = $state(false);
 
     let showModal = $state(false);
     let closeModal: undefined | (() => void) = $state();
@@ -58,22 +64,34 @@
     let mfaModToken: undefined | MfaModTokenResponse = $state();
     let mfaModSecs: undefined | number = $state();
     let interval: undefined | number;
+    let enrollmentInterval: undefined | number;
 
     let isOtpEnabled = $state(false);
     let otpSize = $state(6);
     let otps: OtpResponse[] = $state([]);
-    let otpKind: undefined | OtpKind = $state();
-    let otpName: undefined | string = $state();
+    let otpKind: OtpKind = $state('email');
+    let pendingOtpKind: undefined | OtpKind = $state();
+    let pendingEnrollment: undefined | TotpEnrollmentResponse = $state();
+    let enrollmentSecs: undefined | number = $state();
+    let otpName = $state('');
     let otpId: undefined | string = $state();
-    let hasOtp = $state(false);
+    let hasOtp = $derived(otps.some(otp => otp.is_active));
+    let pendingCodeSize = $derived(pendingOtpKind === 'time' ? 6 : otpSize);
 
     onMount(() => {
         fetchPasskeys();
+        return () => {
+            clearInterval(interval);
+            clearInterval(enrollmentInterval);
+        };
     });
 
     $effect(() => {
         if (isOtpEnabled) {
             fetchOtps();
+        } else {
+            otps = [];
+            cancelOtpEnrollment();
         }
     });
 
@@ -193,23 +211,15 @@
         let res = await fetchGet<OtpResponse[]>(`/auth/v1/users/${session.get()?.user_id}/otp`);
         if (res.body) {
             otps = res.body;
-            res.body.forEach(otp => {
-                if (otp.is_active) {
-                    hasOtp = true;
-                    return;
-                }
-            });
         } else {
             err = true;
         }
     }
 
-    async function handleCreateOtp() {
-        // todo currently implement email kind only
-        otpKind = 'email';
-
+    async function handleCreateOtp(_form: HTMLFormElement, params: URLSearchParams) {
         resetMsgErr();
-        if (isInputError || !userId || !otpKind) {
+        let kind = params.get('otp-kind');
+        if (isInputError || !userId || (kind !== 'email' && kind !== 'time')) {
             return;
         }
 
@@ -218,12 +228,21 @@
             showModal = true;
             return;
         }
-        let res = await otpRequest(userId, otpKind, otpName, tokenId);
+        isOtpLoading = true;
+        otpKind = kind;
+        otpName = params.get('otp-name') || '';
+        let res = await otpRequest(userId, otpKind, otpName || undefined, tokenId);
+        isOtpLoading = false;
         if (res.data) {
-            otps.push(res.data);
+            otpId = res.data.enrollment?.enrollment_id || res.data.otp.id;
+            pendingOtpKind = otpKind;
+            pendingEnrollment = res.data.enrollment;
+            otps = [...otps.filter(otp => otp.id !== res.data?.otp.id), res.data.otp];
+            showOtpRegistration = false;
             showOtpInput = true;
-            otpKind = undefined;
-            otpName = '';
+            if (pendingEnrollment) {
+                startEnrollmentTimer(pendingEnrollment.expires_at);
+            }
         } else {
             err = true;
             msg = `${t.mfa.errorReg} - ${res.error}`;
@@ -231,8 +250,6 @@
     }
 
     async function handleActivateOtp(_form: HTMLFormElement, params: URLSearchParams) {
-        // todo currently implement one otp only
-        otpId = otps[0].id.toString();
         resetMsgErr();
 
         if (isInputError || !userId || !showOtpInput || !otpId) {
@@ -246,19 +263,45 @@
             return;
         }
 
+        isOtpLoading = true;
         let res = await otpActivate(userId, otpId, params.get('otp') || '', tokenId);
+        isOtpLoading = false;
         if (res.error) {
             err = true;
             msg = res.error || 'Error';
         } else {
-            showOtpInput = false;
-            for (let otp of otps) {
-                if (otp.id == otpId) {
-                    otp.is_active = true;
-                    hasOtp = true;
-                    return;
-                }
+            cancelOtpEnrollment();
+            msg = t.mfa.otp.registered;
+            await fetchOtps();
+        }
+    }
+
+    function startEnrollmentTimer(expiresAt: number) {
+        clearInterval(enrollmentInterval);
+        let update = () => {
+            enrollmentSecs = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+            if (enrollmentSecs === 0) {
+                cancelOtpEnrollment();
+                err = true;
+                msg = t.mfa.otp.expired;
             }
+        };
+        update();
+        enrollmentInterval = window.setInterval(update, 1000);
+    }
+
+    function cancelOtpEnrollment() {
+        let pendingId = otpId;
+        clearInterval(enrollmentInterval);
+        enrollmentInterval = undefined;
+        showOtpInput = false;
+        pendingEnrollment = undefined;
+        pendingOtpKind = undefined;
+        enrollmentSecs = undefined;
+        otpId = undefined;
+        otpName = '';
+        if (pendingId) {
+            otps = otps.filter(otp => otp.id !== pendingId || otp.is_active);
         }
     }
 
@@ -398,9 +441,7 @@
             </Button>
         </div>
     {/if}
-    {#if isOtpEnabled}
-        <b>{t.mfa.webauthn.title}</b>
-    {/if}
+    <b>{t.mfa.webauthn.title}</b>
     {#if !isWebauthnSupported}
         <div class="err">
             <b>{t.mfa.webauthn.unsupportedText}</b>
@@ -484,31 +525,93 @@
         {/if}
 
         {#if showOtpInput}
-            <p>{t.mfa.otp.activationCode}</p>
+            {#if pendingOtpKind === 'time' && pendingEnrollment}
+                <div class="totpSetup">
+                    <p>{t.mfa.otp.timeSetup}</p>
+                    <img
+                        class="qrCode"
+                        src={`data:image/png;base64,${pendingEnrollment.qr_code_base64}`}
+                        alt={t.mfa.otp.qrAlt}
+                    />
+                    <div class="manualSecret">
+                        <span>{t.mfa.otp.manualSecret}</span>
+                        <code>{pendingEnrollment.secret_base32}</code>
+                    </div>
+                    {#if enrollmentSecs !== undefined}
+                        <p class="expires" aria-live="polite">
+                            {t.mfa.otp.expiresIn}
+                            {enrollmentSecs}
+                            {t.common.seconds}
+                        </p>
+                    {/if}
+                </div>
+            {:else}
+                <p>{t.mfa.otp.activationCode}</p>
+            {/if}
             <Form action="" onSubmit={handleActivateOtp}>
                 <Input
                     bind:ref={refInput}
                     name="otp"
                     autocomplete="one-time-code"
                     label={t.mfa.otp.code}
-                    placeholder={'0'.repeat(otpSize)}
-                    maxLength={otpSize}
-                    minLength={otpSize}
+                    placeholder={'0'.repeat(pendingCodeSize)}
+                    maxLength={pendingCodeSize}
+                    minLength={pendingCodeSize}
                     pattern={PATTERN_OTP_CODE}
                     bind:isError={isInputError}
+                    required
                 />
-                <Button type="submit">{t.mfa.register}</Button>
-                <Button
-                    level={3}
-                    onclick={() => {
-                        showOtpInput = false;
-                    }}>{t.common.cancel}</Button
-                >
+                <div class="regBtns">
+                    <Button type="submit" isLoading={isOtpLoading}>{t.mfa.otp.verify}</Button>
+                    <Button level={3} onclick={cancelOtpEnrollment}>{t.common.cancel}</Button>
+                </div>
+            </Form>
+        {:else if showOtpRegistration}
+            <Form action="" onSubmit={handleCreateOtp}>
+                <fieldset class="otpKinds">
+                    <legend>{t.mfa.otp.chooseKind}</legend>
+                    <label>
+                        <input type="radio" name="otp-kind" value="email" bind:group={otpKind} />
+                        <span>
+                            <b>{t.mfa.otp.titleEmail}</b>
+                            <small>{t.mfa.otp.emailDescription}</small>
+                        </span>
+                    </label>
+                    <label>
+                        <input type="radio" name="otp-kind" value="time" bind:group={otpKind} />
+                        <span>
+                            <b>{t.mfa.otp.titleTime}</b>
+                            <small>{t.mfa.otp.timeDescription}</small>
+                        </span>
+                    </label>
+                </fieldset>
+                <Input
+                    name="otp-name"
+                    bind:value={otpName}
+                    autocomplete="off"
+                    label={t.mfa.otp.factorName}
+                    placeholder={t.mfa.otp.factorNamePlaceholder}
+                    maxLength={32}
+                    pattern={PATTERN_USER_NAME}
+                    required={otpKind === 'time'}
+                    bind:isError={isInputError}
+                />
+                <div class="regBtns">
+                    <Button type="submit" isLoading={isOtpLoading}>{t.mfa.otp.continue}</Button>
+                    <Button
+                        level={3}
+                        onclick={() => {
+                            showOtpRegistration = false;
+                            otpName = '';
+                        }}>{t.common.cancel}</Button
+                    >
+                </div>
             </Form>
         {:else}
             <div class="button">
-                <Button level={hasOtp === false ? 1 : 2} onclick={handleCreateOtp}
-                    >{t.mfa.registerNew}</Button
+                <Button
+                    level={hasOtp === false ? 1 : 2}
+                    onclick={() => (showOtpRegistration = true)}>{t.mfa.registerNew}</Button
                 >
             </div>
         {/if}
@@ -519,8 +622,7 @@
             </div>
         {/if}
         <div class="keysContainer">
-            {#each otps as otp}
-                <!-- Todo: inactive otp could be shown when having other kind of otp? -->
+            {#each otps as otp (otp.id)}
                 <UserOtp {otp} showInactive={false} onDelete={handleDeleteOtp} />
             {/each}
         </div>
@@ -536,7 +638,7 @@
             </div>
         {/if}
 
-        <div class:success={!err} class:err>
+        <div class:success={!err} class:err role={err ? 'alert' : 'status'} aria-live="polite">
             {msg}
         </div>
     {/if}
@@ -663,5 +765,77 @@
 
     .regNewBtn {
         margin: 0.5rem 0;
+    }
+
+    .otpKinds {
+        width: min(95dvw, 25rem);
+        margin: 0.5rem 0;
+        padding: 0;
+        border: 0;
+    }
+
+    .otpKinds legend {
+        margin-bottom: 0.25rem;
+        font-weight: bold;
+    }
+
+    .otpKinds label {
+        min-height: 2.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        cursor: pointer;
+    }
+
+    .otpKinds input {
+        width: 1.1rem;
+        height: 1.1rem;
+        margin: 0;
+        accent-color: hsl(var(--action));
+    }
+
+    .otpKinds input:focus-visible {
+        outline: 2px solid hsl(var(--accent));
+        outline-offset: 2px;
+    }
+
+    .otpKinds span {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .otpKinds small {
+        color: hsla(var(--text) / 0.75);
+    }
+
+    .totpSetup {
+        width: min(95dvw, 25rem);
+    }
+
+    .qrCode {
+        width: min(15rem, 80dvw);
+        height: auto;
+        display: block;
+        margin: 0.75rem auto;
+        border-radius: var(--border-radius);
+    }
+
+    .manualSecret {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .manualSecret code {
+        max-width: 100%;
+        padding: 0.5rem;
+        overflow-wrap: anywhere;
+        border-radius: var(--border-radius);
+        background: hsl(var(--bg-high));
+        user-select: all;
+    }
+
+    .expires {
+        color: hsla(var(--text) / 0.75);
     }
 </style>

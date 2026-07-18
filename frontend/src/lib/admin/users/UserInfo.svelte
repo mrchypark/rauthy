@@ -184,18 +184,15 @@
     $effect(() => {
         if (isOtpEnabled) {
             fetchOtps();
+        } else {
+            hasOtp = false;
         }
     });
 
     async function fetchOtps() {
         let res = await fetchGet<OtpResponse[]>(`/auth/v1/users/${user.id}/otp`);
         if (res.body) {
-            for (let otp of res.body) {
-                if (otp.is_active) {
-                    hasOtp = true;
-                    return;
-                }
-            }
+            hasOtp = res.body.some(otp => otp.is_active);
         }
     }
 

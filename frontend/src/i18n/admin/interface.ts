@@ -446,6 +446,9 @@ export interface I18nAdmin {
                 mfaDelete1: string;
                 mfaDelete2: string;
                 noMfaOtps: string;
+                resetTitle: string;
+                resetConfirm: string;
+                resetButton: string;
             };
             webauthn: {
                 title: string;
