@@ -28,7 +28,7 @@ use crate::entity::refresh_tokens::RefreshToken;
 use crate::entity::refresh_tokens_devices::RefreshTokenDevice;
 use crate::entity::roles::Role;
 use crate::entity::scopes::Scope;
-use crate::entity::sessions::{MfaMethod, Session, SessionState};
+use crate::entity::sessions::{AuthMethod, MfaMethod, Session, SessionState};
 use crate::entity::theme::{ThemeCss, ThemeCssFull};
 use crate::entity::tos::ToS;
 use crate::entity::tos_user_accept::ToSUserAccept;
@@ -257,12 +257,15 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS
     debug!("Migrating table: refresh_tokens");
-    let query = if sqlite_column_exists(&conn, "refresh_tokens", "mfa_method")? {
+    let query = if sqlite_column_exists(&conn, "refresh_tokens", "auth_method")? {
         "SELECT * FROM refresh_tokens"
+    } else if sqlite_column_exists(&conn, "refresh_tokens", "mfa_method")? {
+        r#"SELECT id, user_id, nbf, exp, scope, is_mfa, mfa_method,
+            'unknown' AS auth_method, session_id, access_token_jti FROM refresh_tokens"#
     } else {
         r#"SELECT id, user_id, nbf, exp, scope, is_mfa,
             CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
-            session_id, access_token_jti FROM refresh_tokens"#
+            'unknown' AS auth_method, session_id, access_token_jti FROM refresh_tokens"#
     };
     let before = query_sqlite::<RefreshToken>(&conn, query).await?;
     inserts::refresh_tokens(before).await?;
@@ -334,11 +337,15 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS DEVICES
     debug!("Migrating table: refresh_tokens_devices");
-    let query = if sqlite_column_exists(&conn, "refresh_tokens_devices", "mfa_method")? {
+    let query = if sqlite_column_exists(&conn, "refresh_tokens_devices", "auth_method")? {
         "SELECT * FROM refresh_tokens_devices"
+    } else if sqlite_column_exists(&conn, "refresh_tokens_devices", "mfa_method")? {
+        r#"SELECT id, device_id, user_id, nbf, exp, scope, mfa_method,
+            'unknown' AS auth_method, access_token_jti FROM refresh_tokens_devices"#
     } else {
         r#"SELECT id, device_id, user_id, nbf, exp, scope,
-            'none' AS mfa_method, access_token_jti FROM refresh_tokens_devices"#
+            'none' AS mfa_method, 'unknown' AS auth_method,
+            access_token_jti FROM refresh_tokens_devices"#
     };
     let before = query_sqlite::<RefreshTokenDevice>(&conn, query).await?;
     inserts::refresh_tokens_devices(before).await?;
@@ -363,6 +370,11 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
                     .ok()
                     .and_then(|value| MfaMethod::from_str(&value).ok())
                     .unwrap_or_else(|| legacy_mfa_method(is_mfa)),
+                auth_method: row
+                    .get::<_, String>("auth_method")
+                    .ok()
+                    .and_then(|value| AuthMethod::from_str(&value).ok())
+                    .unwrap_or(AuthMethod::Unknown),
                 state,
                 exp: row.get("exp")?,
                 last_seen: row.get("last_seen")?,
@@ -845,12 +857,15 @@ pub async fn migrate_from_postgres() -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS
     debug!("Migrating table: refresh_tokens");
-    let query = if pg_column_exists(&cl, "refresh_tokens", "mfa_method").await? {
+    let query = if pg_column_exists(&cl, "refresh_tokens", "auth_method").await? {
         "SELECT * FROM refresh_tokens"
+    } else if pg_column_exists(&cl, "refresh_tokens", "mfa_method").await? {
+        r#"SELECT id, user_id, nbf, exp, scope, is_mfa, mfa_method,
+            'unknown' AS auth_method, session_id, access_token_jti FROM refresh_tokens"#
     } else {
         r#"SELECT id, user_id, nbf, exp, scope, is_mfa,
             CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
-            session_id, access_token_jti FROM refresh_tokens"#
+            'unknown' AS auth_method, session_id, access_token_jti FROM refresh_tokens"#
     };
     let before = DB::pg_query_map_with(&cl, query, &[], 0).await?;
     inserts::refresh_tokens(before).await?;
@@ -897,23 +912,30 @@ pub async fn migrate_from_postgres() -> Result<(), ErrorResponse> {
 
     // REFRESH TOKENS DEVICES
     debug!("Migrating table: refresh_tokens_devices");
-    let query = if pg_column_exists(&cl, "refresh_tokens_devices", "mfa_method").await? {
+    let query = if pg_column_exists(&cl, "refresh_tokens_devices", "auth_method").await? {
         "SELECT * FROM refresh_tokens_devices"
+    } else if pg_column_exists(&cl, "refresh_tokens_devices", "mfa_method").await? {
+        r#"SELECT id, device_id, user_id, nbf, exp, scope, mfa_method,
+            'unknown' AS auth_method, access_token_jti FROM refresh_tokens_devices"#
     } else {
         r#"SELECT id, device_id, user_id, nbf, exp, scope,
-            'none' AS mfa_method, access_token_jti FROM refresh_tokens_devices"#
+            'none' AS mfa_method, 'unknown' AS auth_method,
+            access_token_jti FROM refresh_tokens_devices"#
     };
     let before = DB::pg_query_map_with(&cl, query, &[], 0).await?;
     inserts::refresh_tokens_devices(before).await?;
 
     // SESSIONS
     debug!("Migrating table: sessions");
-    let query = if pg_column_exists(&cl, "sessions", "mfa_method").await? {
+    let query = if pg_column_exists(&cl, "sessions", "auth_method").await? {
         "SELECT * FROM sessions"
+    } else if pg_column_exists(&cl, "sessions", "mfa_method").await? {
+        r#"SELECT id, csrf_token, user_id, roles, groups, is_mfa, mfa_method,
+            'unknown' AS auth_method, state, exp, last_seen, remote_ip FROM sessions"#
     } else {
         r#"SELECT id, csrf_token, user_id, roles, groups, is_mfa,
             CASE WHEN is_mfa THEN 'mfa' ELSE 'none' END AS mfa_method,
-            state, exp, last_seen, remote_ip FROM sessions"#
+            'unknown' AS auth_method, state, exp, last_seen, remote_ip FROM sessions"#
     };
     let before = DB::pg_query_map_with(&cl, query, &[], 16).await?;
     inserts::sessions(before).await?;

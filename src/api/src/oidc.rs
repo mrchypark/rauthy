@@ -693,6 +693,7 @@ pub async fn post_device_verify(
             client.validate_mfa_method(session.mfa_method)?;
             device_code.verified_by = Some(principal.user_id()?.to_string());
             device_code.mfa_method = session.mfa_method;
+            device_code.auth_method = session.auth_method;
             device_code.save().await?;
             Ok(HttpResponse::Accepted().finish())
         }

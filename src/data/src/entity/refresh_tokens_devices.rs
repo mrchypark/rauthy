@@ -1,5 +1,5 @@
 use crate::database::DB;
-use crate::entity::sessions::MfaMethod;
+use crate::entity::sessions::{AuthMethod, MfaMethod};
 use chrono::Utc;
 use hiqlite::macros::params;
 use rauthy_common::is_hiqlite;
@@ -19,6 +19,8 @@ pub struct RefreshTokenDevice {
     pub scope: Option<String>,
     #[column(parse)]
     pub mfa_method: MfaMethod,
+    #[column(parse)]
+    pub auth_method: AuthMethod,
     pub access_token_jti: Option<String>,
 }
 
@@ -49,6 +51,7 @@ impl RefreshTokenDevice {
         exp: i64,
         scope: Option<String>,
         mfa_method: MfaMethod,
+        auth_method: AuthMethod,
         access_token_jti: Option<String>,
     ) -> Result<Self, ErrorResponse> {
         let rt = Self {
@@ -59,6 +62,7 @@ impl RefreshTokenDevice {
             exp,
             scope,
             mfa_method,
+            auth_method,
             access_token_jti,
         };
 
@@ -189,11 +193,11 @@ impl RefreshTokenDevice {
     pub async fn save(&self) -> Result<(), ErrorResponse> {
         let sql = r#"
 INSERT INTO refresh_tokens_devices
-(id, device_id, user_id, nbf, exp, scope, mfa_method, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+(id, device_id, user_id, nbf, exp, scope, mfa_method, auth_method, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT(id) DO UPDATE
 SET device_id = $2, user_id = $3, nbf = $4, exp = $5, scope = $6, mfa_method = $7,
-    access_token_jti = $8"#;
+    auth_method = $8, access_token_jti = $9"#;
 
         if is_hiqlite() {
             DB::hql()
@@ -207,6 +211,7 @@ SET device_id = $2, user_id = $3, nbf = $4, exp = $5, scope = $6, mfa_method = $
                         self.exp,
                         self.scope.clone(),
                         self.mfa_method.as_str(),
+                        self.auth_method.as_str(),
                         self.access_token_jti.clone()
                     ),
                 )
@@ -222,6 +227,7 @@ SET device_id = $2, user_id = $3, nbf = $4, exp = $5, scope = $6, mfa_method = $
                     &self.exp,
                     &self.scope,
                     &self.mfa_method.as_str(),
+                    &self.auth_method.as_str(),
                     &self.access_token_jti,
                 ],
             )

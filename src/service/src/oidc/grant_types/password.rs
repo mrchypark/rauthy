@@ -123,6 +123,7 @@ pub async fn grant_type_password(
                 AuthCodeFlow::No,
                 DeviceCodeFlow::No,
                 MfaMethod::None,
+                rauthy_data::entity::sessions::AuthMethod::Password,
             )
             .await?;
 

@@ -300,6 +300,7 @@ pub async fn post_fed_cm_token(
         AuthCodeFlow::No,
         DeviceCodeFlow::No,
         MfaMethod::Federated,
+        rauthy_data::entity::sessions::AuthMethod::Federated,
     )
     .await?;
 

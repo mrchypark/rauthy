@@ -123,6 +123,8 @@ pub async fn post_authorize(
         user.last_failed_login = None;
         user.failed_login_attempts = None;
         user.save(None).await?;
+        session.auth_method = rauthy_data::entity::sessions::AuthMethod::Password;
+        session.upsert().await?;
     }
     // If the password was correct, we don't want a login delay anymore.
     // It should only prevent username enumeration and brute force, not degrade the UX.

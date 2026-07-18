@@ -1267,8 +1267,8 @@ pub async fn refresh_tokens(data_before: Vec<RefreshToken>) -> Result<(), ErrorR
     let sql_1 = "DELETE FROM refresh_tokens";
     let sql_2 = r#"
 INSERT INTO refresh_tokens
-(id, user_id, nbf, exp, scope, is_mfa, mfa_method, session_id, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
+(id, user_id, nbf, exp, scope, is_mfa, mfa_method, auth_method, session_id, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1284,6 +1284,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                         b.scope,
                         b.is_mfa,
                         b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.session_id,
                         b.access_token_jti
                     ),
@@ -1303,6 +1304,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                     &b.scope,
                     &b.is_mfa,
                     &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.session_id,
                     &b.access_token_jti,
                 ],
@@ -1319,8 +1321,8 @@ pub async fn refresh_tokens_devices(
     let sql_1 = "DELETE FROM refresh_tokens_devices";
     let sql_2 = r#"
 INSERT INTO refresh_tokens_devices
-(id, device_id, user_id, nbf, exp, scope, mfa_method, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
+(id, device_id, user_id, nbf, exp, scope, mfa_method, auth_method, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1336,6 +1338,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                         b.exp,
                         b.scope,
                         b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.access_token_jti
                     ),
                 )
@@ -1354,6 +1357,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                     &b.exp,
                     &b.scope,
                     &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.access_token_jti,
                 ],
             )
@@ -1428,8 +1432,8 @@ pub async fn sessions(data_before: Vec<Session>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM sessions";
     let sql_2 = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, state, exp, last_seen)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, auth_method, state, exp, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1445,6 +1449,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
                         b.groups,
                         b.is_mfa,
                         b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.state.as_str(),
                         b.exp,
                         b.last_seen
@@ -1465,6 +1470,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
                     &b.groups,
                     &b.is_mfa,
                     &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.state.as_str(),
                     &b.exp,
                     &b.last_seen,

@@ -41,6 +41,46 @@ pub struct Session {
     #[serde(default)]
     #[column(parse)]
     pub mfa_method: MfaMethod,
+    #[serde(default)]
+    #[column(parse)]
+    pub auth_method: AuthMethod,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMethod {
+    #[default]
+    Unknown,
+    Password,
+    Federated,
+    Passkey,
+}
+
+impl AuthMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Password => "password",
+            Self::Federated => "federated",
+            Self::Passkey => "passkey",
+        }
+    }
+}
+
+impl FromStr for AuthMethod {
+    type Err = ErrorResponse;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "password" => Ok(Self::Password),
+            "federated" => Ok(Self::Federated),
+            "passkey" => Ok(Self::Passkey),
+            _ => Err(ErrorResponse::new(
+                ErrorResponseType::Internal,
+                "invalid auth method",
+            )),
+        }
+    }
 }
 
 /// The MFA method actually verified for this session.
@@ -430,11 +470,11 @@ OFFSET $3"#;
 
         let sql = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, state, exp, last_seen, remote_ip)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, auth_method, state, exp, last_seen, remote_ip)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT(id) DO UPDATE
-SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, state = $8, exp = $9,
-    last_seen = $10, remote_ip = $11"#;
+SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, auth_method = $8,
+    state = $9, exp = $10, last_seen = $11, remote_ip = $12"#;
 
         if is_hiqlite() {
             DB::hql()
@@ -448,6 +488,7 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, state =
                         &self.groups,
                         self.is_mfa,
                         self.mfa_method.as_str(),
+                        self.auth_method.as_str(),
                         state_str,
                         self.exp,
                         self.last_seen,
@@ -466,6 +507,7 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, state =
                     &self.groups,
                     &self.is_mfa,
                     &self.mfa_method.as_str(),
+                    &self.auth_method.as_str(),
                     &state_str,
                     &self.exp,
                     &self.last_seen,
@@ -547,6 +589,7 @@ impl Session {
             groups: None,
             is_mfa: false, // cannot be known during creation
             mfa_method: MfaMethod::None,
+            auth_method: AuthMethod::Unknown,
             state: SessionState::Init,
             exp: now
                 .add(chrono::Duration::seconds(exp_in as i64))
@@ -596,6 +639,7 @@ impl Session {
             groups,
             is_mfa: false, // cannot be known during creation
             mfa_method: MfaMethod::None,
+            auth_method: AuthMethod::Unknown,
             state: SessionState::Init,
             exp,
             last_seen: now.timestamp(),
@@ -816,6 +860,9 @@ impl Session {
         method: MfaMethod,
     ) -> Result<(), ErrorResponse> {
         debug_assert!(method.is_mfa());
+        if method == MfaMethod::WebAuthn && self.auth_method == AuthMethod::Unknown {
+            self.auth_method = AuthMethod::Passkey;
+        }
         self.mfa_method = method;
         self.is_mfa = method.is_mfa();
         self.set_authenticated(user).await

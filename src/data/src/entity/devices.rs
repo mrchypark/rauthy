@@ -1,6 +1,6 @@
 use crate::database::{Cache, DB};
 use crate::entity::refresh_tokens_devices::RefreshTokenDevice;
-use crate::entity::sessions::MfaMethod;
+use crate::entity::sessions::{AuthMethod, MfaMethod};
 use chrono::{DateTime, Utc};
 use hiqlite::macros::params;
 use rauthy_api_types::users::DeviceResponse;
@@ -13,7 +13,7 @@ use std::ops::{Add, Sub};
 
 use crate::rauthy_config::RauthyConfig;
 use rauthy_derive::FromPgRow;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, Deserialize, FromPgRow)]
 pub struct DeviceEntity {
@@ -174,8 +174,6 @@ pub struct DeviceAuthCode {
     pub device_code: String,
     /// Will be Some(user_id) once a user has been validated the auth request
     pub verified_by: Option<String>,
-    /// MFA proof copied from the browser session which approved this request.
-    pub mfa_method: MfaMethod,
     /// We need the additional `exp` here because a verification from a
     /// user will reset the lifetime, which means without the additional
     /// check here, it could be possible that a code lives longer than
@@ -191,6 +189,11 @@ pub struct DeviceAuthCode {
     // the given interval and gets 'slow_down' from us. If this happens
     // too many times, the IP will be blacklisted.1
     pub warnings: u8,
+    /// Appended for bincode compatibility; old in-flight grants are invalidated on decode failure.
+    #[serde(default)]
+    pub mfa_method: MfaMethod,
+    #[serde(default)]
+    pub auth_method: AuthMethod,
 }
 
 impl DeviceAuthCode {
@@ -208,13 +211,14 @@ impl DeviceAuthCode {
             client_id,
             device_code: get_rand(DEVICE_KEY_LENGTH as usize),
             verified_by: None,
-            mfa_method: MfaMethod::None,
             exp,
             last_poll: now,
             scopes,
             nonce,
             client_secret,
             warnings: 0,
+            mfa_method: MfaMethod::None,
+            auth_method: AuthMethod::Unknown,
         };
 
         DB::hql()
@@ -236,7 +240,17 @@ impl DeviceAuthCode {
     }
 
     pub async fn find(user_code: String) -> Result<Option<Self>, ErrorResponse> {
-        let slf: Option<Self> = DB::hql().get(Cache::DeviceCode, user_code).await?;
+        let slf: Option<Self> = match DB::hql().get(Cache::DeviceCode, user_code.clone()).await {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "invalidating legacy in-flight device grant; client must restart"
+                );
+                DB::hql().delete(Cache::DeviceCode, user_code).await?;
+                return Ok(None);
+            }
+        };
         match slf {
             None => Ok(None),
             Some(slf) => {
@@ -268,6 +282,46 @@ impl DeviceAuthCode {
             )
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rauthy_common::utils::{deserialize, serialize};
+
+    /// Exact pre-method-tracking cache shape. This protects the deliberate
+    /// restart path for grants created by an older process during an upgrade.
+    #[derive(Debug, Serialize)]
+    struct LegacyDeviceAuthCode {
+        client_id: String,
+        device_code: String,
+        verified_by: Option<String>,
+        exp: DateTime<Utc>,
+        last_poll: DateTime<Utc>,
+        scopes: Option<String>,
+        nonce: Option<String>,
+        client_secret: Option<String>,
+        warnings: u8,
+    }
+
+    #[test]
+    fn legacy_device_grant_payload_requires_a_clean_restart() {
+        let now = Utc::now();
+        let bytes = serialize(&LegacyDeviceAuthCode {
+            client_id: "client".to_string(),
+            device_code: "device-code".to_string(),
+            verified_by: Some("user".to_string()),
+            exp: now,
+            last_poll: now,
+            scopes: Some("openid".to_string()),
+            nonce: None,
+            client_secret: None,
+            warnings: 0,
+        })
+        .unwrap();
+
+        assert!(deserialize::<DeviceAuthCode>(&bytes).is_err());
     }
 }
 

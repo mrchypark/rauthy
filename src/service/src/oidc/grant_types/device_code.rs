@@ -180,6 +180,7 @@ pub async fn grant_type_device_code(peer_ip: IpAddr, payload: TokenRequest) -> H
             AuthCodeFlow::No,
             DeviceCodeFlow::Yes(id),
             code.mfa_method,
+            code.auth_method,
         )
         .await
         {

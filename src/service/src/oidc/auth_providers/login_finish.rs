@@ -109,10 +109,12 @@ pub async fn login_finish<'a>(
     );
     let require_otp = may_require_otp && user.has_otp_enabled().await?;
     if provider_mfa_satisfied {
+        session.auth_method = rauthy_data::entity::sessions::AuthMethod::Federated;
         session.mfa_method = MfaMethod::Provider;
         session.is_mfa = true;
         session.upsert().await?;
     } else {
+        session.auth_method = rauthy_data::entity::sessions::AuthMethod::Federated;
         session.mfa_method = MfaMethod::Federated;
         session.is_mfa = false;
         session.upsert().await?;

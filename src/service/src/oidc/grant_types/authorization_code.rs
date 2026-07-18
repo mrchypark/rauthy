@@ -191,6 +191,10 @@ pub async fn grant_type_authorization_code(
         AuthCodeFlow::Yes,
         DeviceCodeFlow::No,
         mfa_method,
+        session
+            .as_ref()
+            .map(|session| session.auth_method)
+            .unwrap_or(rauthy_data::entity::sessions::AuthMethod::Unknown),
     )
     .await?;
 
