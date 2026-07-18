@@ -61,6 +61,11 @@ use zeroize::Zeroizing;
 const TOTP_DIGITS: usize = 6;
 const TOTP_SKEW: u8 = 1;
 const TOTP_STEP_SECONDS: u64 = 30;
+const SQL_ACCEPT_TOTP: &str = r#"
+UPDATE one_time_password
+SET last_used = $1, last_used_step = $2
+WHERE id = $3 AND user_id = $4 AND kind = $5 AND is_active = $6
+  AND last_used_step < $2"#;
 
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::EnumIter, ToSchema,
@@ -203,16 +208,17 @@ impl OneTimePassword {
                 .expose()
                 .to_vec(),
         );
-        Self::insert(user_id, name, kind, secret.as_slice(), false).await
+        Self::insert(user_id, name, kind, secret.as_slice(), false, 0).await
     }
 
     pub async fn create_totp(
         user_id: String,
         name: Option<String>,
         secret: &[u8],
+        last_used_step: i64,
     ) -> Result<Self, ErrorResponse> {
         Self::totp(secret, None, String::new())?;
-        Self::insert(user_id, name, OtpKind::Time, secret, true).await
+        Self::insert(user_id, name, OtpKind::Time, secret, true, last_used_step).await
     }
 
     async fn insert(
@@ -221,6 +227,7 @@ impl OneTimePassword {
         kind: OtpKind,
         secret: &[u8],
         is_active: bool,
+        last_used_step: i64,
     ) -> Result<Self, ErrorResponse> {
         let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         let otp = Self {
@@ -230,7 +237,7 @@ impl OneTimePassword {
             secret: EncValue::encrypt(secret)?.into_bytes().to_vec(),
             enc_key_id,
             last_used: 0,
-            last_used_step: 0,
+            last_used_step,
             kind,
             is_active,
         };
@@ -539,15 +546,10 @@ impl OneTimePassword {
             ));
         };
         let last_used = unix_time as i64;
-        let sql = r#"
-UPDATE one_time_password
-SET last_used = $1, last_used_step = $2
-WHERE id = $3 AND user_id = $4 AND kind = $5 AND is_active = $6
-  AND last_used_step < $2"#;
         let rows_affected = if is_hiqlite() {
             DB::hql()
                 .execute(
-                    sql,
+                    SQL_ACCEPT_TOTP,
                     params!(
                         last_used,
                         matched_step,
@@ -560,7 +562,7 @@ WHERE id = $3 AND user_id = $4 AND kind = $5 AND is_active = $6
                 .await?
         } else {
             DB::pg_execute(
-                sql,
+                SQL_ACCEPT_TOTP,
                 &[
                     &last_used,
                     &matched_step,
@@ -1083,7 +1085,7 @@ pub async fn auth_finish(
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::one_time_password::{OneTimePassword, OtpKind};
+    use crate::entity::one_time_password::{OneTimePassword, OtpKind, SQL_ACCEPT_TOTP};
     use std::str::FromStr;
 
     #[test]
@@ -1115,6 +1117,49 @@ mod tests {
             None
         );
         assert!(OneTimePassword::match_totp_step(secret, "12345x", 59).is_err());
+    }
+
+    #[test]
+    fn enrolled_totp_step_blocks_immediate_replay() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE one_time_password (
+                id TEXT, user_id TEXT, kind TEXT, is_active INTEGER,
+                last_used INTEGER, last_used_step INTEGER
+            );",
+        )
+        .unwrap();
+        let enrolled_step = 42_i64;
+        conn.execute(
+            "INSERT INTO one_time_password VALUES ($1, $2, $3, $4, $5, $6)",
+            rusqlite::params!["otp", "user", "time", true, 0_i64, enrolled_step],
+        )
+        .unwrap();
+
+        let stored_step: i64 = conn
+            .query_row(
+                "SELECT last_used_step FROM one_time_password WHERE id = 'otp'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_step, enrolled_step);
+        assert_eq!(
+            conn.execute(
+                SQL_ACCEPT_TOTP,
+                rusqlite::params![1_i64, enrolled_step, "otp", "user", "time", true],
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.execute(
+                SQL_ACCEPT_TOTP,
+                rusqlite::params![2_i64, enrolled_step + 1, "otp", "user", "time", true],
+            )
+            .unwrap(),
+            1
+        );
     }
 
     #[test]

@@ -34,12 +34,13 @@ pub struct Session {
     pub groups: Option<String>,
     pub is_mfa: bool,
     #[column(parse)]
-    pub mfa_method: MfaMethod,
-    #[column(parse)]
     pub state: SessionState,
     pub exp: i64,
     pub last_seen: i64,
     pub remote_ip: Option<String>,
+    #[serde(default)]
+    #[column(parse)]
+    pub mfa_method: MfaMethod,
 }
 
 /// The MFA method actually verified for this session.
@@ -216,8 +217,14 @@ impl Session {
     pub async fn find(id: String) -> Result<Self, ErrorResponse> {
         let client = DB::hql();
 
-        if let Some(slf) = client.get(Cache::Session, id.clone()).await? {
-            return Ok(slf);
+        match client.get(Cache::Session, id.clone()).await {
+            Ok(Some(slf)) => return Ok(slf),
+            Ok(None) => {}
+            Err(hiqlite::Error::Bincode(err)) => {
+                warn!(session_id = id, %err, "Evicting incompatible legacy Session cache entry");
+                client.delete(Cache::Session, id.clone()).await?;
+            }
+            Err(err) => return Err(err.into()),
         }
 
         let sql = "SELECT * FROM sessions WHERE id = $1";
@@ -864,8 +871,10 @@ pub fn get_header_value<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::sessions::{Session, SessionState};
+    use crate::entity::sessions::{MfaMethod, Session, SessionState};
+    use rauthy_common::utils::{deserialize, serialize};
     use rauthy_error::ErrorResponse;
+    use serde::Serialize;
     use std::net::IpAddr;
     use std::str::FromStr;
 
@@ -893,5 +902,39 @@ mod tests {
         assert!(s.is_valid(600, Some(ip), "/"));
 
         Ok(())
+    }
+
+    #[test]
+    fn legacy_session_cache_payload_requires_targeted_eviction() {
+        #[derive(Debug, Serialize)]
+        struct LegacySession {
+            id: String,
+            csrf_token: String,
+            user_id: Option<String>,
+            roles: Option<String>,
+            groups: Option<String>,
+            is_mfa: bool,
+            state: SessionState,
+            exp: i64,
+            last_seen: i64,
+            remote_ip: Option<String>,
+        }
+
+        let legacy = LegacySession {
+            id: "session".into(),
+            csrf_token: "csrf".into(),
+            user_id: Some("user".into()),
+            roles: None,
+            groups: None,
+            is_mfa: true,
+            state: SessionState::Auth,
+            exp: 123,
+            last_seen: 100,
+            remote_ip: Some("127.0.0.1".into()),
+        };
+        let bytes = serialize(&legacy).unwrap();
+        let err = deserialize::<Session>(&bytes).unwrap_err();
+        assert!(err.message.contains("UnexpectedEnd"));
+        assert_eq!(MfaMethod::default(), MfaMethod::None);
     }
 }
