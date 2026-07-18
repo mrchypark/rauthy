@@ -1635,12 +1635,12 @@ pub async fn delete_user_otp(
     }
 
     if let Ok(otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
-        OneTimePassword::delete(&otp.id).await?;
         if is_admin_reset {
             Session::invalidate_for_user(&user_id).await?;
             RefreshToken::invalidate_for_user(&user_id).await?;
             IssuedToken::revoke_for_user(&user_id, true).await?;
             logout::execute_backchannel_logout(None, Some(user_id.clone())).await?;
+            OneTimePassword::delete(&otp.id).await?;
             Event::otp_admin_reset(
                 &user_id,
                 otp.kind.as_str(),
@@ -1650,6 +1650,7 @@ pub async fn delete_user_otp(
             .send()
             .await?;
         } else {
+            OneTimePassword::delete(&otp.id).await?;
             Event::otp_deletion(&user_id, otp.kind.as_str(), ip)
                 .send()
                 .await?;

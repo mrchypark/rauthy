@@ -111,8 +111,9 @@ pub struct TokenNonce(pub String);
 pub struct TokenScopes(pub String);
 
 /// OIDC Core delegates concrete values to the IANA AMR registry. We emit the
-/// verified factor (`otp` or `hwk`) plus `mfa`; `pwd` is included only when the
-/// account actually has a local password authentication step.
+/// verified factor (`otp`) plus `mfa`; WebAuthn is represented conservatively
+/// as `mfa` because a platform or synced passkey is not necessarily hardware
+/// protected. `pwd` is included only when the local flow required it.
 fn amr_values(account_type: &AccountType, method: MfaMethod) -> Vec<&'static str> {
     let used_password = matches!(
         account_type,
@@ -120,8 +121,8 @@ fn amr_values(account_type: &AccountType, method: MfaMethod) -> Vec<&'static str
     );
     match method {
         MfaMethod::None => vec!["pwd"],
-        MfaMethod::WebAuthn if used_password => vec!["pwd", "hwk", "mfa"],
-        MfaMethod::WebAuthn => vec!["hwk", "mfa"],
+        MfaMethod::WebAuthn if used_password => vec!["pwd", "mfa"],
+        MfaMethod::WebAuthn => vec!["mfa"],
         MfaMethod::Totp if used_password => vec!["pwd", "otp", "mfa"],
         MfaMethod::Totp => vec!["otp", "mfa"],
         MfaMethod::Provider => vec!["mfa"],
@@ -771,7 +772,7 @@ mod tests {
     fn amr_uses_the_verified_webauthn_method() {
         assert_eq!(
             amr_values(&AccountType::Password, MfaMethod::WebAuthn),
-            vec!["pwd", "hwk", "mfa"]
+            vec!["pwd", "mfa"]
         );
     }
 
@@ -779,7 +780,7 @@ mod tests {
     fn passkey_only_amr_does_not_claim_a_password() {
         assert_eq!(
             amr_values(&AccountType::Passkey, MfaMethod::WebAuthn),
-            vec!["hwk", "mfa"]
+            vec!["mfa"]
         );
     }
 
