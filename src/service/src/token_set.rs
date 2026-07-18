@@ -121,9 +121,8 @@ fn amr_values(account_type: &AccountType, method: MfaMethod) -> Vec<&'static str
     );
     match method {
         MfaMethod::None if used_password => vec!["pwd"],
-        MfaMethod::None if matches!(account_type, AccountType::Federated) => vec!["federated"],
         MfaMethod::None => Vec::new(),
-        MfaMethod::Federated => vec!["federated"],
+        MfaMethod::Federated => Vec::new(),
         MfaMethod::WebAuthn if used_password => vec!["pwd", "mfa"],
         MfaMethod::WebAuthn => vec!["mfa"],
         MfaMethod::Totp if used_password => vec!["pwd", "otp", "mfa"],
@@ -800,7 +799,7 @@ mod tests {
     fn federated_login_without_mfa_does_not_claim_a_password() {
         assert_eq!(
             amr_values(&AccountType::FederatedPassword, MfaMethod::Federated),
-            vec!["federated"]
+            Vec::<&str>::new()
         );
     }
 
