@@ -42,9 +42,6 @@ pub async fn grant_type_password(
     }
 
     let (client_id, client_secret) = req_data.try_get_client_id_secret(&req)?;
-    let email = req_data.username.as_ref().unwrap();
-    let password = req_data.password.unwrap();
-
     let client = Client::find(client_id).await?;
     client.validate_enabled()?;
     let header_origin = client.get_validated_origin_header(&req)?;
@@ -55,6 +52,10 @@ pub async fn grant_type_password(
         client.validate_secret(secret, &req).await?;
     }
     client.validate_flow("password")?;
+    validate_password_grant_mfa(&client)?;
+
+    let email = req_data.username.as_ref().unwrap();
+    let password = req_data.password.unwrap();
 
     let mut headers = Vec::new();
     let dpop_fingerprint =
@@ -152,5 +153,24 @@ pub async fn grant_type_password(
             // TODO add expo increasing sleeps after failed login attempts here?
             Err(err)
         }
+    }
+}
+
+fn validate_password_grant_mfa(client: &Client) -> Result<(), ErrorResponse> {
+    client.validate_mfa_method(MfaMethod::None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_password_grant_mfa;
+    use rauthy_data::entity::clients::Client;
+
+    #[test]
+    fn password_grant_rejects_force_mfa_without_an_interactive_proof() {
+        let mut client = Client::default();
+        client.id = "password-grant-client".to_string();
+        client.force_mfa = true;
+
+        assert!(validate_password_grant_mfa(&client).is_err());
     }
 }

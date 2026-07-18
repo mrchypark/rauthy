@@ -115,10 +115,10 @@ pub struct TokenScopes(pub String);
 /// as `mfa` because a platform or synced passkey is not necessarily hardware
 /// protected. `pwd` is included only when the local flow required it.
 fn amr_values(account_type: &AccountType, method: MfaMethod) -> Vec<&'static str> {
-    let used_password = matches!(
-        account_type,
-        AccountType::Password | AccountType::FederatedPassword
-    );
+    // `FederatedPassword` describes account capability, not which primary
+    // authentication was used. Legacy sessions did not record that distinction,
+    // so only an unambiguously local password account may claim `pwd`.
+    let used_password = matches!(account_type, AccountType::Password);
     match method {
         MfaMethod::None if used_password => vec!["pwd"],
         MfaMethod::None => Vec::new(),
@@ -808,6 +808,14 @@ mod tests {
         assert_eq!(
             amr_values(&AccountType::Password, MfaMethod::None),
             vec!["pwd"]
+        );
+    }
+
+    #[test]
+    fn legacy_federated_password_session_does_not_claim_password() {
+        assert_eq!(
+            amr_values(&AccountType::FederatedPassword, MfaMethod::None),
+            Vec::<&str>::new()
         );
     }
 
