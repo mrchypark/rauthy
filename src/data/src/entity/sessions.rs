@@ -51,6 +51,8 @@ pub struct Session {
 pub enum MfaMethod {
     #[default]
     None,
+    /// Authentication delegated to an upstream provider without an MFA claim.
+    Federated,
     WebAuthn,
     Totp,
     Provider,
@@ -62,6 +64,7 @@ impl MfaMethod {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
+            Self::Federated => "federated",
             Self::WebAuthn => "webauthn",
             Self::Totp => "totp",
             Self::Provider => "provider",
@@ -70,7 +73,7 @@ impl MfaMethod {
     }
 
     pub const fn is_mfa(self) -> bool {
-        !matches!(self, Self::None)
+        !matches!(self, Self::None | Self::Federated)
     }
 }
 
@@ -80,6 +83,7 @@ impl FromStr for MfaMethod {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "none" => Ok(Self::None),
+            "federated" => Ok(Self::Federated),
             "webauthn" => Ok(Self::WebAuthn),
             "totp" => Ok(Self::Totp),
             "provider" => Ok(Self::Provider),

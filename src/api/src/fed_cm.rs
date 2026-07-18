@@ -299,7 +299,7 @@ pub async fn post_fed_cm_token(
         None,
         AuthCodeFlow::No,
         DeviceCodeFlow::No,
-        MfaMethod::None,
+        MfaMethod::Federated,
     )
     .await?;
 

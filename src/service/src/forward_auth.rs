@@ -414,6 +414,7 @@ mod tests {
     #[test]
     fn forward_auth_header_reports_verified_session_proof() {
         assert!(!mfa_header_value(MfaMethod::None));
+        assert!(!mfa_header_value(MfaMethod::Federated));
         assert!(mfa_header_value(MfaMethod::Totp));
         assert!(mfa_header_value(MfaMethod::WebAuthn));
         assert!(mfa_header_value(MfaMethod::Provider));

@@ -112,6 +112,10 @@ pub async fn login_finish<'a>(
         session.mfa_method = MfaMethod::Provider;
         session.is_mfa = true;
         session.upsert().await?;
+    } else {
+        session.mfa_method = MfaMethod::Federated;
+        session.is_mfa = false;
+        session.upsert().await?;
     }
 
     let client = Client::find_maybe_ephemeral(slf.req_client_id).await?;
