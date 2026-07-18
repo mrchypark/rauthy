@@ -227,6 +227,35 @@ VALUES ($1, $2, $3, $4, $5)"#;
     Ok(())
 }
 
+pub async fn client_favicons(data_before: Vec<Logo>) -> Result<(), ErrorResponse> {
+    let sql_1 = "DELETE FROM client_favicons";
+    let sql_2 = r#"
+INSERT INTO client_favicons (client_id, res, content_type, data, updated)
+VALUES ($1, $2, $3, $4, $5)"#;
+
+    if is_hiqlite() {
+        DB::hql().execute(sql_1, params!()).await?;
+        for b in data_before {
+            DB::hql()
+                .execute(
+                    sql_2,
+                    params!(b.id, b.res.as_str(), b.content_type, b.data, b.updated),
+                )
+                .await?;
+        }
+    } else {
+        DB::pg_execute(sql_1, &[]).await?;
+        for b in data_before {
+            DB::pg_execute(
+                sql_2,
+                &[&b.id, &b.res.as_str(), &b.content_type, &b.data, &b.updated],
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn clients(data_before: Vec<Client>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM clients";
     let sql_2 = r#"
