@@ -162,6 +162,7 @@ export const I18nZh: I18n = {
         invalidKeyUsed: '无效密钥',
         login: '登录',
         mfaAck: '已确认',
+        chooseMfa: 'Choose a verification method',
         navigateToAccount: 'Account Dashboard',
         needsUserUpdate: `Some information for this account is missing. You need to update these 
             values before you can proceed with the login.`,

@@ -140,6 +140,7 @@ export interface I18n {
         invalidKeyUsed: string;
         login: string;
         mfaAck: string;
+        chooseMfa: string;
         navigateToAccount: string;
         needsUserUpdate: string;
         orLoginWith: string;

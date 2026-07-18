@@ -32,6 +32,8 @@
         CodeChallengeMethod,
         LoginRefreshRequest,
         LoginRequest,
+        MfaChoiceResponse,
+        MfaLoginMethod,
         OtpLoginResponse,
         RequestResetRequest,
         WebauthnLoginResponse,
@@ -86,6 +88,7 @@
     let mfaPurpose: undefined | MfaPurpose = $state();
     let mfaKind: undefined | 'webauthn' | 'otp' = $state();
     let activeOtps: undefined | ActiveOtp[] = $state();
+    let mfaChoices: undefined | MfaLoginMethod[] = $state();
 
     let isLoading = $state(false);
     let isAutoRefreshing = $state(false);
@@ -263,7 +266,11 @@
         await handleAuthRes(res);
     }
 
-    async function onSubmit(form?: HTMLFormElement, params?: URLSearchParams) {
+    async function onSubmit(
+        form?: HTMLFormElement,
+        params?: URLSearchParams,
+        selectedMfa?: MfaLoginMethod,
+    ) {
         if (isAtproto) {
             return providerLogin(atprotoId);
         }
@@ -324,14 +331,28 @@
         }
 
         let res = await fetchPost<
-            undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse
-        >(url, payload, 'json', 'noRedirect');
+            | undefined
+            | WebauthnLoginResponse
+            | ToSAwaitLoginResponse
+            | OtpLoginResponse
+            | MfaChoiceResponse
+        >(
+            url,
+            payload,
+            'json',
+            'noRedirect',
+            selectedMfa ? { 'x-rauthy-mfa-method': selectedMfa } : undefined,
+        );
         await handleAuthRes(res);
     }
 
     async function handleAuthRes(
         res?: IResponse<
-            undefined | WebauthnLoginResponse | ToSAwaitLoginResponse | OtpLoginResponse
+            | undefined
+            | WebauthnLoginResponse
+            | ToSAwaitLoginResponse
+            | OtpLoginResponse
+            | MfaChoiceResponse
         >,
     ) {
         isLoading = false;
@@ -354,7 +375,11 @@
             // -> all good, but needs additional MFA validation
             err = '';
             let body = res.body;
-            if (body && 'code' in body) {
+            if (body && 'methods' in body) {
+                mfaChoices = body.methods;
+            } else if (body && 'code' in body) {
+                mfaChoices = undefined;
+                password = '';
                 mfaPurpose = { Login: body.code as string };
                 if ('active_otps' in body) {
                     activeOtps = body.active_otps;
@@ -600,9 +625,32 @@
                             onError={onMfaError}
                         />
                     {/if}
+                {:else if mfaChoices}
+                    <div class="mfaChoice" role="group" aria-label={t.authorize.chooseMfa}>
+                        <b>{t.authorize.chooseMfa}</b>
+                        {#if mfaChoices.includes('webauthn')}
+                            <Button
+                                ariaLabel={t.mfa.webauthn.title}
+                                {isLoading}
+                                onclick={() => onSubmit(undefined, undefined, 'webauthn')}
+                            >
+                                {t.mfa.webauthn.title}
+                            </Button>
+                        {/if}
+                        {#if mfaChoices.includes('totp')}
+                            <Button
+                                ariaLabel={t.mfa.otp.titleTime}
+                                level={2}
+                                {isLoading}
+                                onclick={() => onSubmit(undefined, undefined, 'totp')}
+                            >
+                                {t.mfa.otp.titleTime}
+                            </Button>
+                        {/if}
+                    </div>
                 {/if}
 
-                {#if !clientMfaForce}
+                {#if !clientMfaForce && !mfaChoices}
                     <Form action={authorizeUrl} {onSubmit}>
                         <div class:emailMinHeight={!showPasswordInput}>
                             {#if isAtproto}
@@ -782,6 +830,14 @@
 </Main>
 
 <style>
+    .mfaChoice {
+        width: min(90dvw, 18rem);
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin: 1rem 0;
+    }
+
     .loadingGlobal {
         width: 100dvw;
         height: 100dvh;

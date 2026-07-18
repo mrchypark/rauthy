@@ -169,6 +169,7 @@ export const I18nKo: I18n = {
         invalidKeyUsed: '유효하지 않은 키입니다.',
         login: '로그인',
         mfaAck: '확인되었습니다.',
+        chooseMfa: '인증 방법을 선택하세요',
         navigateToAccount: 'Account Dashboard',
         needsUserUpdate: `Some information for this account is missing. You need to update these
             values before you can proceed with the login.`,

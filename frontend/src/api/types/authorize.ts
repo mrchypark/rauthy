@@ -70,6 +70,12 @@ export interface OtpLoginResponse {
     active_otps: ActiveOtp[];
 }
 
+export type MfaLoginMethod = 'webauthn' | 'totp';
+
+export interface MfaChoiceResponse {
+    methods: MfaLoginMethod[];
+}
+
 export interface WebauthnLoginResponse {
     code: string;
     user_id: string;

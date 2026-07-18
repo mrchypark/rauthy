@@ -12,6 +12,7 @@ export interface IResponse<T> {
 function buildHeaders(
     method: 'GET' | 'PATCH' | 'POST' | 'PUT' | 'DELETE',
     payload: 'json' | 'form',
+    extraHeaders?: HeadersInit,
 ): HeadersInit {
     let headers: any;
     if (payload === 'json') {
@@ -30,6 +31,12 @@ function buildHeaders(
         headers['x-csrf-token'] = getCsrfToken();
     }
 
+    if (extraHeaders) {
+        new Headers(extraHeaders).forEach((value, key) => {
+            headers[key] = value;
+        });
+    }
+
     return headers;
 }
 
@@ -46,9 +53,10 @@ export async function fetchPost<T>(
     payload?: Object,
     typ: 'json' | 'form' = 'json',
     redirect: 'handle401' | 'noRedirect' = 'handle401',
+    headers?: HeadersInit,
 ): Promise<IResponse<T>> {
     if (payload) {
-        return fetchWithBody('POST', uri, typ, redirect, payload);
+        return fetchWithBody('POST', uri, typ, redirect, payload, headers);
     } else {
         return fetchWithoutBody('POST', uri, typ, redirect);
     }
@@ -123,6 +131,7 @@ async function fetchWithBody<T>(
     typ: 'json' | 'form',
     redirect: 'handle401' | 'noRedirect',
     payload: Object | FormData,
+    extraHeaders?: HeadersInit,
 ): Promise<IResponse<T>> {
     let body;
     if (typ === 'json') {
@@ -133,7 +142,7 @@ async function fetchWithBody<T>(
 
     let res = await fetch(uri, {
         method,
-        headers: buildHeaders(method, typ),
+        headers: buildHeaders(method, typ, extraHeaders),
         redirect: 'manual',
         body,
     });

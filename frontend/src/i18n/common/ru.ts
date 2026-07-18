@@ -175,6 +175,7 @@ export const I18nRu: I18n = {
         invalidKeyUsed: 'Неверный ключ',
         login: 'Вход',
         mfaAck: 'Подтверждено',
+        chooseMfa: 'Choose a verification method',
         navigateToAccount: 'Панель учётной записи',
         needsUserUpdate: `Некоторая информация для этой учётной записи отсутствует. Вам необходимо обновить эти
             значения, прежде чем вы сможете продолжить вход.`,
