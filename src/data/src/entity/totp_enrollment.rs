@@ -1,11 +1,11 @@
 use crate::database::{Cache, DB};
+use crate::entity::otp_attempt_state::OtpAttemptState;
 use chrono::Utc;
 use cryptr::EncValue;
 use rauthy_common::utils::get_rand;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::time::Duration;
 use zeroize::Zeroizing;
 
 const ENROLLMENT_TTL_SECS: i64 = 120;
@@ -57,6 +57,7 @@ impl PendingTotpEnrollment {
     }
 
     pub async fn save(&self) -> Result<(), ErrorResponse> {
+        OtpAttemptState::delete_expired(Utc::now().timestamp()).await?;
         DB::hql()
             .put(
                 Cache::OneTimePassword,
@@ -65,17 +66,6 @@ impl PendingTotpEnrollment {
                 Some(ENROLLMENT_TTL_SECS),
             )
             .await?;
-        let attempts = self.attempts_idx();
-        let consumed = self.consumed_idx();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(ENROLLMENT_TTL_SECS as u64)).await;
-            let _ = DB::hql()
-                .counter_del(Cache::OneTimePassword, attempts)
-                .await;
-            let _ = DB::hql()
-                .counter_del(Cache::OneTimePassword, consumed)
-                .await;
-        });
         Ok(())
     }
 
@@ -120,11 +110,10 @@ impl PendingTotpEnrollment {
     }
 
     pub async fn ensure_attempts_available(&self) -> Result<(), ErrorResponse> {
-        let attempts = DB::hql()
-            .counter_get(Cache::OneTimePassword, self.attempts_idx())
+        if OtpAttemptState::find_active(&self.attempts_idx(), Utc::now().timestamp())
             .await?
-            .unwrap_or_default();
-        if attempts >= MAX_ATTEMPTS {
+            .is_some_and(|state| state.attempts >= MAX_ATTEMPTS)
+        {
             return Err(Self::too_many_attempts());
         }
         Ok(())
@@ -132,22 +121,30 @@ impl PendingTotpEnrollment {
 
     /// Records a failed confirmation. The enrollment remains usable until the threshold.
     pub async fn record_failure(&self) -> Result<i64, ErrorResponse> {
-        let attempts = DB::hql()
-            .counter_add(Cache::OneTimePassword, self.attempts_idx(), 1)
-            .await?;
-        if attempts >= MAX_ATTEMPTS {
-            self.delete().await?;
+        let now = Utc::now().timestamp();
+        let state = OtpAttemptState::increment(
+            &self.attempts_idx(),
+            now,
+            self.expires_at.saturating_sub(now).max(1),
+        )
+        .await?;
+        if state.attempts >= MAX_ATTEMPTS {
+            self.terminate().await?;
             return Err(Self::too_many_attempts());
         }
-        Ok(attempts)
+        Ok(state.attempts)
     }
 
     /// Atomically grants one caller the right to persist this enrollment.
     pub async fn claim_once(&self) -> Result<(), ErrorResponse> {
-        let claims = DB::hql()
-            .counter_add(Cache::OneTimePassword, self.consumed_idx(), 1)
-            .await?;
-        if claims != 1 {
+        let now = Utc::now().timestamp();
+        let state = OtpAttemptState::increment(
+            &self.consumed_idx(),
+            now,
+            self.expires_at.saturating_sub(now).max(1),
+        )
+        .await?;
+        if state.attempts != 1 {
             return Err(ErrorResponse::new(
                 ErrorResponseType::BadRequest,
                 "TOTP enrollment has already been consumed",
@@ -160,10 +157,13 @@ impl PendingTotpEnrollment {
         DB::hql()
             .delete(Cache::OneTimePassword, Self::cache_idx(&self.id))
             .await?;
-        DB::hql()
-            .counter_del(Cache::OneTimePassword, self.attempts_idx())
-            .await?;
+        OtpAttemptState::delete(&self.attempts_idx()).await?;
         Ok(())
+    }
+
+    pub async fn terminate(&self) -> Result<(), ErrorResponse> {
+        self.delete().await?;
+        OtpAttemptState::delete(&self.consumed_idx()).await
     }
 
     pub fn secret(&self) -> Result<Zeroizing<Vec<u8>>, ErrorResponse> {

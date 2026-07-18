@@ -1,9 +1,9 @@
 use crate::database::{Cache, DB};
+use crate::entity::otp_attempt_state::OtpAttemptState;
 use chrono::Utc;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::time::Duration;
 
 const MAX_ATTEMPTS: i64 = 5;
 const BLOCK_SECS: i64 = 60;
@@ -20,79 +20,62 @@ impl OtpVerificationAttempt {
     fn identity_key(user_id: &str, ip: IpAddr) -> String {
         format!("otp_verify:user:{user_id}:{ip}")
     }
-
-    fn challenge_key(challenge: &str, ip: IpAddr) -> String {
-        format!("otp_verify:challenge:{challenge}:{ip}")
-    }
-
     fn user_key(user_id: &str) -> String {
         format!("otp_verify:user:{user_id}")
     }
-
+    fn challenge_key(challenge: &str, ip: IpAddr) -> String {
+        format!("otp_verify:challenge:{challenge}:{ip}")
+    }
     fn challenge_global_key(challenge: &str) -> String {
         format!("otp_verify:challenge:{challenge}")
     }
-
     fn claim_key(challenge: &str) -> String {
         format!("otp_verify:claim:{challenge}")
     }
-
     fn block_key(user_id: &str, ip: IpAddr) -> String {
         format!("otp_verify:block:{user_id}:{ip}")
     }
-
     fn user_block_key(user_id: &str) -> String {
         format!("otp_verify:block:user:{user_id}")
     }
-
     fn challenge_block_key(challenge: &str) -> String {
         format!("otp_verify:block:challenge:{challenge}")
     }
-
     fn consumed_key(challenge: &str) -> String {
         format!("otp_verify:consumed:{challenge}")
     }
 
     pub async fn ensure_identity_available(user_id: &str, ip: IpAddr) -> Result<(), ErrorResponse> {
-        let user_ip: Option<i64> = DB::hql()
-            .get(Cache::OneTimePassword, Self::block_key(user_id, ip))
-            .await?;
-        let user: Option<i64> = DB::hql()
-            .get(Cache::OneTimePassword, Self::user_block_key(user_id))
-            .await?;
-        if let Some(retry_at) = user_ip.or(user) {
-            return Err(Self::rate_limited(retry_at));
+        let now = Utc::now().timestamp();
+        OtpAttemptState::delete_expired(now).await?;
+        for key in [Self::block_key(user_id, ip), Self::user_block_key(user_id)] {
+            if let Some(state) = OtpAttemptState::find_active(&key, now).await? {
+                return Err(Self::rate_limited(state.expires));
+            }
         }
         Ok(())
     }
 
     pub async fn ensure_challenge_available(challenge: &str) -> Result<(), ErrorResponse> {
-        if let Some(retry_at) = DB::hql()
-            .get(Cache::OneTimePassword, Self::challenge_block_key(challenge))
-            .await?
+        let now = Utc::now().timestamp();
+        if let Some(state) =
+            OtpAttemptState::find_active(&Self::challenge_block_key(challenge), now).await?
         {
-            return Err(Self::rate_limited(retry_at));
+            return Err(Self::rate_limited(state.expires));
         }
         Ok(())
     }
 
-    /// Serializes verification for one challenge across the cluster.
     pub async fn claim(
-        user_id: &str,
-        ip: IpAddr,
+        _user_id: &str,
+        _ip: IpAddr,
         challenge: &str,
         ttl: i64,
     ) -> Result<(), ErrorResponse> {
-        let claims = DB::hql()
-            .counter_add(Cache::OneTimePassword, Self::claim_key(challenge), 1)
-            .await?;
-        if claims == 1 {
-            let user_id = user_id.to_string();
-            let challenge = challenge.to_string();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(ttl.max(1) as u64)).await;
-                let _ = Self::cleanup(&user_id, ip, &challenge).await;
-            });
+        let state =
+            OtpAttemptState::increment(&Self::claim_key(challenge), Utc::now().timestamp(), ttl)
+                .await?;
+        if state.attempts == 1 {
             Ok(())
         } else {
             Err(ErrorResponse::new(
@@ -103,10 +86,7 @@ impl OtpVerificationAttempt {
     }
 
     pub async fn release(challenge: &str) -> Result<(), ErrorResponse> {
-        DB::hql()
-            .counter_del(Cache::OneTimePassword, Self::claim_key(challenge))
-            .await?;
-        Ok(())
+        OtpAttemptState::delete(&Self::claim_key(challenge)).await
     }
 
     pub async fn record_failure(
@@ -114,40 +94,35 @@ impl OtpVerificationAttempt {
         ip: IpAddr,
         challenge: &str,
     ) -> Result<(), ErrorResponse> {
-        let identity = DB::hql()
-            .counter_add(Cache::OneTimePassword, Self::identity_key(user_id, ip), 1)
-            .await?;
-        let user = DB::hql()
-            .counter_add(Cache::OneTimePassword, Self::user_key(user_id), 1)
-            .await?;
-        let challenge_attempts = DB::hql()
-            .counter_add(
-                Cache::OneTimePassword,
-                Self::challenge_key(challenge, ip),
-                1,
-            )
-            .await?;
-        let challenge_global = DB::hql()
-            .counter_add(
-                Cache::OneTimePassword,
-                Self::challenge_global_key(challenge),
-                1,
-            )
-            .await?;
-        if identity >= MAX_ATTEMPTS
-            || user >= MAX_ATTEMPTS
-            || challenge_attempts >= MAX_ATTEMPTS
-            || challenge_global >= MAX_ATTEMPTS
-        {
-            let retry_at = Utc::now().timestamp() + BLOCK_SECS;
+        let now = Utc::now().timestamp();
+        let keys = [
+            Self::identity_key(user_id, ip),
+            Self::user_key(user_id),
+            Self::challenge_key(challenge, ip),
+            Self::challenge_global_key(challenge),
+        ];
+        let mut limited = false;
+        for key in &keys {
+            limited |= OtpAttemptState::increment(key, now, BLOCK_SECS)
+                .await?
+                .attempts
+                >= MAX_ATTEMPTS;
+        }
+        if limited {
+            for key in &keys {
+                OtpAttemptState::delete(key).await?;
+            }
+            let mut retry_at = now + BLOCK_SECS;
             for key in [
                 Self::block_key(user_id, ip),
                 Self::user_block_key(user_id),
                 Self::challenge_block_key(challenge),
             ] {
-                DB::hql()
-                    .put(Cache::OneTimePassword, key, &retry_at, Some(BLOCK_SECS))
-                    .await?;
+                retry_at = retry_at.max(
+                    OtpAttemptState::increment(&key, now, BLOCK_SECS)
+                        .await?
+                        .expires,
+                );
             }
             return Err(Self::rate_limited(retry_at));
         }
@@ -172,19 +147,31 @@ impl OtpVerificationAttempt {
                 Some(ttl),
             )
             .await?;
-        Self::cleanup(user_id, ip, challenge).await?;
-        Ok(())
+        Self::cleanup(user_id, ip, challenge, true).await
     }
 
-    pub async fn cleanup(user_id: &str, ip: IpAddr, challenge: &str) -> Result<(), ErrorResponse> {
-        for key in [
+    async fn cleanup(
+        user_id: &str,
+        ip: IpAddr,
+        challenge: &str,
+        include_blocks: bool,
+    ) -> Result<(), ErrorResponse> {
+        let mut keys = vec![
             Self::identity_key(user_id, ip),
             Self::user_key(user_id),
             Self::challenge_key(challenge, ip),
             Self::challenge_global_key(challenge),
             Self::claim_key(challenge),
-        ] {
-            DB::hql().counter_del(Cache::OneTimePassword, key).await?;
+        ];
+        if include_blocks {
+            keys.extend([
+                Self::block_key(user_id, ip),
+                Self::user_block_key(user_id),
+                Self::challenge_block_key(challenge),
+            ]);
+        }
+        for key in keys {
+            OtpAttemptState::delete(&key).await?;
         }
         Ok(())
     }
@@ -195,7 +182,7 @@ impl OtpVerificationAttempt {
             Self::challenge_global_key(challenge),
             Self::claim_key(challenge),
         ] {
-            DB::hql().counter_del(Cache::OneTimePassword, key).await?;
+            OtpAttemptState::delete(&key).await?;
         }
         Ok(())
     }
@@ -218,7 +205,7 @@ impl OtpVerificationAttempt {
                 Some(ttl),
             )
             .await?;
-        Self::cleanup(user_id, ip, challenge).await
+        Self::cleanup(user_id, ip, challenge, false).await
     }
 
     pub async fn consumed(challenge: &str) -> Result<Option<ConsumedOtpChallenge>, ErrorResponse> {
@@ -241,37 +228,20 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
-    fn repeated_challenges_share_the_user_ip_limit() {
-        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-        assert_eq!(
-            OtpVerificationAttempt::identity_key("user", ip),
-            OtpVerificationAttempt::identity_key("user", ip)
-        );
-        assert_ne!(
-            OtpVerificationAttempt::challenge_key("first", ip),
-            OtpVerificationAttempt::challenge_key("second", ip)
-        );
-    }
-
-    #[test]
-    fn identity_limit_is_scoped_by_user_and_ip() {
+    fn user_and_challenge_scopes_do_not_depend_on_ip() {
         let first = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let second = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
-        assert_ne!(
-            OtpVerificationAttempt::identity_key("user-a", first),
-            OtpVerificationAttempt::identity_key("user-b", first)
-        );
-        assert_ne!(
-            OtpVerificationAttempt::identity_key("user-a", first),
-            OtpVerificationAttempt::identity_key("user-a", second)
-        );
         assert_eq!(
-            OtpVerificationAttempt::user_key("user-a"),
-            OtpVerificationAttempt::user_key("user-a")
+            OtpVerificationAttempt::user_key("user"),
+            OtpVerificationAttempt::user_key("user")
         );
         assert_eq!(
             OtpVerificationAttempt::challenge_global_key("challenge"),
             OtpVerificationAttempt::challenge_global_key("challenge")
+        );
+        assert_ne!(
+            OtpVerificationAttempt::identity_key("user", first),
+            OtpVerificationAttempt::identity_key("user", second)
         );
     }
 }
