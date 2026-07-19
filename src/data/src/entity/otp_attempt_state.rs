@@ -1,11 +1,11 @@
 use crate::database::DB;
-use hiqlite::macros::params;
+use hiqlite::macros::{FromRow, params};
 use rauthy_common::is_hiqlite;
 use rauthy_derive::FromPgRow;
 use rauthy_error::ErrorResponse;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, FromPgRow)]
+#[derive(Debug, Deserialize, FromPgRow, FromRow)]
 pub struct OtpAttemptState {
     pub attempts: i64,
     pub expires: i64,
@@ -30,7 +30,7 @@ ON CONFLICT(scope_key) DO UPDATE SET
 RETURNING attempts, expires"#;
         if is_hiqlite() {
             Ok(DB::hql()
-                .query_as_one(sql, params!(scope_key, expires, now))
+                .execute_returning_map_one(sql, params!(scope_key, expires, now))
                 .await?)
         } else {
             Ok(DB::pg_query_one(sql, &[&scope_key, &expires, &now]).await?)
@@ -72,16 +72,90 @@ RETURNING attempts, expires"#;
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn expiry_window_resets_at_boundary() {
-        fn next(current: Option<(i64, i64)>, now: i64, ttl: i64) -> (i64, i64) {
-            match current {
-                Some((attempts, expires)) if expires > now => (attempts + 1, expires),
-                _ => (1, now + ttl),
-            }
-        }
+    use super::OtpAttemptState;
+    use crate::database::DB;
+    use hiqlite::macros::params;
+    use hiqlite::{Node, NodeConfig};
+    use rauthy_common::{DB_TYPE, DbType};
+    use std::net::TcpListener;
 
-        assert_eq!(next(Some((4, 101)), 100, 60), (5, 101));
-        assert_eq!(next(Some((5, 100)), 100, 60), (1, 160));
+    fn available_ports() -> (u16, u16) {
+        let api = TcpListener::bind("127.0.0.1:0").unwrap();
+        let raft = TcpListener::bind("127.0.0.1:0").unwrap();
+        let ports = (
+            api.local_addr().unwrap().port(),
+            raft.local_addr().unwrap().port(),
+        );
+        drop((api, raft));
+        ports
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn attempt_window_increments_and_resets_at_expiry_with_hiqlite() {
+        assert_eq!(DB_TYPE.get_or_init(|| DbType::Hiqlite), &DbType::Hiqlite);
+
+        let (api_port, raft_port) = available_ports();
+        let data_dir =
+            std::env::temp_dir().join(format!("rauthy-otp-attempt-state-{}", std::process::id()));
+        if data_dir.exists() {
+            std::fs::remove_dir_all(&data_dir).unwrap();
+        }
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let node = Node {
+            id: 1,
+            addr_raft: format!("127.0.0.1:{raft_port}"),
+            addr_api: format!("127.0.0.1:{api_port}"),
+        };
+        let mut config = NodeConfig::default();
+        config.node_id = 1;
+        config.nodes = vec![node];
+        config.listen_addr_api = "127.0.0.1".into();
+        config.listen_addr_raft = "127.0.0.1".into();
+        config.data_dir = data_dir.to_string_lossy().into_owned().into();
+        config.filename_db = "otp-attempt-state.db".into();
+        config.secret_raft = "otp-attempt-state-raft".to_string();
+        config.secret_api = "otp-attempt-state-api".to_string();
+        config.enc_keys = cryptr::EncKeys::generate().unwrap();
+        config.cache_storage_disk = false;
+        config.health_check_delay_secs = 0;
+        config.raft_config = NodeConfig::default_raft_config(100);
+
+        DB::init(config).await.unwrap();
+        DB::hql()
+            .execute(
+                r#"CREATE TABLE otp_attempt_state
+(
+    scope_key TEXT NOT NULL PRIMARY KEY,
+    attempts  INTEGER NOT NULL,
+    expires   INTEGER NOT NULL
+) STRICT"#,
+                params!(),
+            )
+            .await
+            .unwrap();
+
+        let now = 1_000_000;
+        let ttl = 60;
+        let first = OtpAttemptState::increment("totp:test", now, ttl)
+            .await
+            .unwrap();
+        assert_eq!(first.attempts, 1);
+        assert_eq!(first.expires, now + ttl);
+
+        let second = OtpAttemptState::increment("totp:test", now + 1, ttl)
+            .await
+            .unwrap();
+        assert_eq!(second.attempts, 2);
+        assert_eq!(second.expires, first.expires);
+
+        let reset = OtpAttemptState::increment("totp:test", first.expires, ttl)
+            .await
+            .unwrap();
+        assert_eq!(reset.attempts, 1);
+        assert_eq!(reset.expires, first.expires + ttl);
+
+        DB::hql().shutdown().await.unwrap();
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 }
