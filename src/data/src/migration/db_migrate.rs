@@ -150,19 +150,6 @@ pub async fn migrate_from_sqlite(db_from: &str) -> Result<(), ErrorResponse> {
     .await?;
     inserts::client_logos(before).await?;
 
-    // CLIENT FAVICONS
-    debug!("Migrating table: client_favicons");
-    let before = if conn.table_exists(None, "client_favicons")? {
-        query_sqlite::<Logo>(
-            &conn,
-            "SELECT client_id AS id, res, content_type, data, updated FROM client_favicons",
-        )
-        .await?
-    } else {
-        Vec::new()
-    };
-    inserts::client_favicons(before).await?;
-
     // CLIENTS SCIM
     debug!("Migrating table: clients_scim");
     let mut stmt = conn.prepare("SELECT * FROM clients_scim")?;
@@ -703,25 +690,6 @@ pub async fn migrate_from_postgres() -> Result<(), ErrorResponse> {
     )
     .await?;
     inserts::client_logos(before).await?;
-
-    // CLIENT FAVICONS
-    debug!("Migrating table: client_favicons");
-    let has_client_favicons = cl
-        .query_one("SELECT to_regclass('client_favicons') IS NOT NULL", &[])
-        .await?
-        .get::<_, bool>(0);
-    let before = if has_client_favicons {
-        DB::pg_query_map_with(
-            &cl,
-            "SELECT client_id AS id, res, content_type, data, updated FROM client_favicons",
-            &[],
-            0,
-        )
-        .await?
-    } else {
-        Vec::new()
-    };
-    inserts::client_favicons(before).await?;
 
     // CLIENTS SCIM
     debug!("Migrating table: clients_scim");
