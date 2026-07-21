@@ -89,7 +89,6 @@ pub static IDX_AUTH_PROVIDER: &str = "auth_provider_";
 pub static IDX_AUTH_PROVIDER_LOGO: &str = "auth_provider_logo_";
 pub static IDX_AUTH_PROVIDER_TEMPLATE: &str = "provider_json_tpl";
 pub static IDX_CLIENTS: &str = "clients_";
-pub static IDX_CLIENT_FAVICON: &str = "client_favicon_";
 pub static IDX_CLIENT_LOGO: &str = "client_logo_";
 pub static IDX_GROUPS: &str = "groups_";
 pub static IDX_JWK_KID: &str = "jwk_kid_";

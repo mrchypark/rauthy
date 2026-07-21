@@ -18,7 +18,7 @@ use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::clients_dyn::ClientDyn;
 use rauthy_data::entity::clients_scim::ClientScim;
 use rauthy_data::entity::failed_backchannel_logout::FailedBackchannelLogout;
-use rauthy_data::entity::logos::{Logo, LogoType};
+use rauthy_data::entity::logos::{Logo, LogoRes, LogoType};
 use rauthy_data::entity::user_login_states::UserLoginState;
 use rauthy_data::rauthy_config::RauthyConfig;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
@@ -450,7 +450,7 @@ pub async fn delete_client_logo(
 ) -> Result<HttpResponse, ErrorResponse> {
     principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Delete)?;
 
-    Logo::delete(id.as_str(), &LogoType::Client).await?;
+    Logo::delete_client_logo(id.as_str()).await?;
 
     Ok(HttpResponse::Ok().finish())
 }
@@ -471,7 +471,7 @@ pub async fn get_client_favicon(
     id: web::Path<String>,
     params: Query<LogoParams>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    match Logo::find_cached(id.as_str(), &LogoType::ClientFavicon).await {
+    match Logo::find(id.as_str(), LogoRes::Favicon, &LogoType::Client).await {
         Ok(favicon) => Ok(client_image_response(favicon, params.updated)),
         Err(err) if err.error == ErrorResponseType::NotFound => {
             Ok(HttpResponse::NotFound().finish())
@@ -506,7 +506,14 @@ pub async fn put_client_favicon(
     content_len_limit(&req, 10)?;
 
     let (buf, content_type) = multipart_image(payload).await?;
-    Logo::upsert(id.into_inner(), buf, content_type, LogoType::ClientFavicon).await?;
+    Logo::upsert_with_res(
+        id.into_inner(),
+        buf,
+        content_type,
+        LogoType::Client,
+        LogoRes::Favicon,
+    )
+    .await?;
 
     Ok(HttpResponse::Ok()
         .insert_header(("Clear-Site-Data", "cache"))
@@ -533,7 +540,7 @@ pub async fn delete_client_favicon(
     principal: ReqPrincipal,
 ) -> Result<HttpResponse, ErrorResponse> {
     principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Update)?;
-    Logo::delete(id.as_str(), &LogoType::ClientFavicon).await?;
+    Logo::delete_res(id.as_str(), &LogoType::Client, LogoRes::Favicon).await?;
 
     Ok(HttpResponse::Ok().finish())
 }
