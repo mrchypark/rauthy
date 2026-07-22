@@ -19,6 +19,7 @@ use rauthy_api_types::clients::{
     NewClientRequest, ScimClientRequestResponse,
 };
 use rauthy_common::constants::{APPLICATION_JSON, CACHE_TTL_APP, SECRET_LEN_CLIENTS};
+use rauthy_common::regex::RE_GRANT_TYPES;
 use rauthy_common::utils::{get_rand, real_ip_from_req};
 use rauthy_common::{http_client, is_hiqlite};
 use rauthy_derive::FromPgRow;
@@ -1290,9 +1291,14 @@ impl Client {
 
     #[inline]
     pub fn validate_redirect_uri(&self, redirect_uri: &str) -> Result<(), ErrorResponse> {
+        // RFC 8252 loopback any-port matching — opt-in via access.rfc_8252_enable,
+        // and only for dynamic and ephemeral clients (never static ones).
+        let loopback = RauthyConfig::get().vars.access.rfc_8252_enable
+            && (self.is_dynamic() || self.is_ephemeral());
         let has_any = self.get_redirect_uris().iter().any(|uri| {
             (uri.ends_with('*') && redirect_uri.starts_with(uri.split_once('*').unwrap().0))
                 || uri.as_str().eq(redirect_uri)
+                || (loopback && loopback_redirect_match(uri, redirect_uri))
         });
 
         if has_any {
@@ -1487,6 +1493,30 @@ impl Client {
     }
 }
 
+/// RFC 8252 section 7.3: for a loopback redirect URI, the authorization
+/// server MUST allow any port chosen by the client at request time. Native
+/// apps (and CLI OAuth clients) bind an ephemeral loopback port, so a
+/// registered `http://127.0.0.1/cb` must match a requested
+/// `http://127.0.0.1:52345/cb`. Everything except the port must be equal,
+/// and both sides must be loopback hosts. Gated behind access.rfc_8252_enable
+/// and applied to dynamic and ephemeral clients only (see `validate_redirect_uri`).
+fn loopback_redirect_match(registered: &str, requested: &str) -> bool {
+    fn parts(u: &str) -> Option<(String, String, String)> {
+        let url = Url::parse(u).ok()?;
+        let host = url.host_str()?.to_string();
+        Some((url.scheme().to_string(), host, url.path().to_string()))
+    }
+    fn is_loopback(host: &str) -> bool {
+        host == "localhost" || host == "127.0.0.1" || host == "[::1]" || host == "::1"
+    }
+    match (parts(registered), parts(requested)) {
+        (Some((rs, rh, rp)), Some((qs, qh, qp))) => {
+            is_loopback(&rh) && is_loopback(&qh) && rs == qs && rh == qh && rp == qp
+        }
+        _ => false,
+    }
+}
+
 impl Client {
     async fn ephemeral_from_url(value: &str) -> Result<Self, ErrorResponse> {
         let res = http_client()
@@ -1507,7 +1537,7 @@ impl Client {
             return Err(ErrorResponse::new(ErrorResponseType::Connection, msg));
         }
 
-        let body = match res.json::<EphemeralClientRequest>().await {
+        let mut body = match res.json::<EphemeralClientRequest>().await {
             Ok(b) => b,
             Err(err) => {
                 let msg =
@@ -1516,6 +1546,23 @@ impl Client {
                 return Err(ErrorResponse::new(ErrorResponseType::BadRequest, msg));
             }
         };
+
+        // A spec-valid CIMD document may advertise a grant type Rauthy does not support
+        // (e.g. claude.ai lists `urn:ietf:params:oauth:grant-type:jwt-bearer` but never uses
+        // it). Rejecting the whole document over an advertised-but-unused grant would block
+        // an otherwise-valid client. When the operator opts in, sanitize the list - strip the
+        // unsupported grant types - so validation passes; the flow set is derived from
+        // `ephemeral_clients.allowed_flows` regardless. Off by default: unknown grant types
+        // are rejected by `validate()` below, keeping the upfront error.
+        if RauthyConfig::get()
+            .vars
+            .ephemeral_clients
+            .ignore_unknown_auth_flows
+            && let Some(grant_types) = body.grant_types.as_mut()
+        {
+            retain_supported_grant_types(grant_types);
+        }
+
         body.validate()?;
 
         let slf = Self::from(body);
@@ -1891,12 +1938,50 @@ fn extract_external_origin<'a>(
     Ok(Some(origin))
 }
 
+/// Strips grant types Rauthy does not support from an ephemeral (CIMD) client document. Used
+/// when `ephemeral_clients.ignore_unknown_auth_flows` is enabled so an operator can accept a
+/// document that advertises an unsupported grant (e.g. claude.ai's
+/// `urn:ietf:params:oauth:grant-type:jwt-bearer`) without enabling anything unsupported - the
+/// effective flows still come from `ephemeral_clients.allowed_flows` (#1644).
+pub(crate) fn retain_supported_grant_types(grant_types: &mut Vec<String>) {
+    grant_types.retain(|g| RE_GRANT_TYPES.is_match(g));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use actix_web::http::header;
     use actix_web::test::TestRequest;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn retain_supported_grant_types_strips_unknown() {
+        // #1644: an ephemeral/CIMD document advertising an unsupported grant (claude.ai's
+        // jwt-bearer) is sanitized down to the grants Rauthy supports; would fail if the strip
+        // were dropped or matched the wrong set.
+        let mut advertised = vec![
+            "authorization_code".to_string(),
+            "refresh_token".to_string(),
+            "urn:ietf:params:oauth:grant-type:jwt-bearer".to_string(),
+        ];
+        retain_supported_grant_types(&mut advertised);
+        assert_eq!(
+            advertised,
+            vec![
+                "authorization_code".to_string(),
+                "refresh_token".to_string()
+            ],
+        );
+
+        // an all-supported list is unchanged; an only-unknown list collapses to empty
+        let mut supported = vec!["authorization_code".to_string()];
+        retain_supported_grant_types(&mut supported);
+        assert_eq!(supported, vec!["authorization_code".to_string()]);
+
+        let mut only_unknown = vec!["urn:ietf:params:oauth:grant-type:jwt-bearer".to_string()];
+        retain_supported_grant_types(&mut only_unknown);
+        assert!(only_unknown.is_empty());
+    }
 
     #[test]
     fn test_client_impl() {

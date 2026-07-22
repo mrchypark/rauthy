@@ -140,7 +140,8 @@ impl Logo {
                 }
             }
             LogoType::AuthProvider => {
-                let sql = "DELETE FROM auth_provider_logos WHERE auth_provider_id = $1 AND res = $2";
+                let sql =
+                    "DELETE FROM auth_provider_logos WHERE auth_provider_id = $1 AND res = $2";
                 if is_hiqlite() {
                     DB::hql().execute(sql, params!(id, res)).await?;
                 } else {
@@ -191,25 +192,35 @@ impl Logo {
         typ: LogoType,
         res: LogoRes,
     ) -> Result<(), ErrorResponse> {
-        match (res, typ) {
-            (LogoRes::Favicon, LogoType::Client) => match content_type.as_ref() {
+        if res == LogoRes::Favicon && typ == LogoType::Client {
+            match content_type.as_ref() {
                 "image/svg+xml" => {
-                    Self::upsert_svg_with_res(id, logo, content_type.to_string(), &typ, LogoRes::Favicon)
-                        .await
+                    Self::upsert_svg_with_res(
+                        id,
+                        logo,
+                        content_type.to_string(),
+                        &typ,
+                        LogoRes::Favicon,
+                    )
+                    .await
                 }
-                "image/jpeg" | "image/png" => {
-                    Self::upsert_favicon_jpg_png(id, logo, typ).await
-                }
+                "image/jpeg" | "image/png" => Self::upsert_favicon_jpg_png(id, logo, typ).await,
                 _ => Err(ErrorResponse::new(
                     ErrorResponseType::BadRequest,
                     "Invalid mime type for auth provider logo",
                 )),
-            },
-            _ => Self::upsert(id, logo, content_type, typ).await,
+            }
+        } else {
+            Self::upsert(id, logo, content_type, typ).await
         }
     }
 
-    async fn upsert_svg(id: String, mut logo: Vec<u8>, content_type: String, typ: &LogoType) -> Result<(), ErrorResponse> {
+    async fn upsert_svg(
+        id: String,
+        logo: Vec<u8>,
+        content_type: String,
+        typ: &LogoType,
+    ) -> Result<(), ErrorResponse> {
         Self::upsert_svg_with_res(id, logo, content_type, typ, LogoRes::Svg).await
     }
 
@@ -314,7 +325,11 @@ impl Logo {
         slf_small.upsert_self(&typ, true).await
     }
 
-    async fn upsert_favicon_jpg_png(id: String, logo: Vec<u8>, typ: LogoType) -> Result<(), ErrorResponse> {
+    async fn upsert_favicon_jpg_png(
+        id: String,
+        logo: Vec<u8>,
+        typ: LogoType,
+    ) -> Result<(), ErrorResponse> {
         let slf = web::block(move || {
             let img = image::load_from_memory(&logo)?;
             let size_small = RES_CLIENT_FAVICON;
@@ -500,13 +515,12 @@ WHERE auth_provider_id = $1 AND res = $2"#
     ) -> Result<Option<i64>, ErrorResponse> {
         let client = DB::hql();
         let cacheable = matches!(typ, LogoType::Client) && matches!(res, LogoRes::Small);
-        if cacheable {
-            if let Some(updated) = client
+        if cacheable
+            && let Some(updated) = client
                 .get(Cache::App, Self::cache_idx_updated(typ, id))
                 .await?
-            {
-                return Ok(updated);
-            }
+        {
+            return Ok(updated);
         }
 
         let use_svg_fallback = res != LogoRes::Favicon;
@@ -536,7 +550,11 @@ WHERE auth_provider_id = $1 AND res = $2"#
                     .first_mut()
                     .map(|r| r.get::<i64>("updated"))
             } else {
-                DB::hql().query_raw(sql, params!(id, res)).await?.first_mut().map(|r| r.get::<i64>("updated"))
+                DB::hql()
+                    .query_raw(sql, params!(id, res))
+                    .await?
+                    .first_mut()
+                    .map(|r| r.get::<i64>("updated"))
             }
         } else {
             if use_svg_fallback {

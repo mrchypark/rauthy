@@ -1,6 +1,6 @@
 # Changelog
 
-## UNRELEASED
+## Unreleased
 
 ### Changes
 
@@ -8,6 +8,18 @@
 
 Client branding now supports a dedicated browser favicon for each client, independently of the
 login logo. Favicons can be uploaded, previewed, and removed from the Admin UI.
+
+[#1653](https://github.com/sebadob/rauthy/pull/1653)
+
+#### Session MFA Upgrade after Passkey Registration
+
+Registering a Passkey from the Account dashboard upgrades the current session to MFA now. Before,
+`is_mfa` stayed `false` until the next login, which meant a fresh admin account that just enrolled
+its first Passkey was still rejected by `admin_force_mfa` and had to log out and back in. The
+Account dashboard also updates the MFA indicator directly after registering or deleting a Passkey
+instead of only after a manual page reload.
+
+[#1649](https://github.com/sebadob/rauthy/pull/1649)
 
 ## v0.36.0
 
