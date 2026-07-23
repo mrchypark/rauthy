@@ -1,9 +1,11 @@
+use crate::oidc::GrantType;
 use rauthy_common::constants::CLIENT_CLAIMS_MAX_LEN;
 use rauthy_common::regex::{
-    RE_ATTR, RE_CODE_CHALLENGE_METHOD, RE_CONTACT, RE_GRANT_TYPES, RE_GROUPS, RE_LINUX_HOSTNAME,
-    RE_ORIGIN, RE_RESOURCE, RE_ROLES_SCOPES, RE_URI,
+    RE_ATTR, RE_CODE_CHALLENGE_METHOD, RE_CONTACT, RE_GROUPS, RE_LINUX_HOSTNAME, RE_ORIGIN,
+    RE_RESOURCE, RE_ROLES_SCOPES, RE_URI,
 };
 use std::borrow::Cow;
+use std::str::FromStr;
 use validator::ValidationError;
 
 #[inline]
@@ -70,29 +72,6 @@ pub fn validate_vec_contact(value: &[String]) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// Strict grant-type validation for admin- and bootstrap-managed clients
-/// (dynamic client registration, `UpdateClientRequest`, bootstrap config): the advertised
-/// grant types are stored verbatim as the client's enabled flows, so an unknown/unsupported
-/// one is rejected up front rather than silently persisted as a dead flow. The single
-/// exception is the ephemeral (CIMD) path, which can opt into stripping unknown grant types
-/// via `ephemeral_clients.ignore_unknown_auth_flows` (see `Client::ephemeral_from_url`).
-#[inline]
-pub fn validate_vec_grant_types(value: &[String]) -> Result<(), ValidationError> {
-    if value.is_empty() {
-        return Err(ValidationError::new(
-            "'flows_enabled' cannot be empty when provided",
-        ));
-    }
-    for v in value {
-        if !RE_GRANT_TYPES.is_match(v) {
-            return Err(ValidationError::new(
-                "^(authorization_code|client_credentials|urn:ietf:params:oauth:grant-type:device_code|password|refresh_token)$",
-            ));
-        }
-    }
-    Ok(())
-}
-
 #[inline]
 pub fn validate_vec_linux_hostname(value: &[String]) -> Result<(), ValidationError> {
     for v in value {
@@ -143,12 +122,18 @@ pub fn validate_vec_resource(value: &[String]) -> Result<(), ValidationError> {
 /// accepting such a document by enabling `ephemeral_clients.ignore_unknown_auth_flows`,
 /// which strips the unknown grant types in `Client::ephemeral_from_url` *before* this
 /// validation runs, so the sanitized list passes here.
+///
+/// This is the one grant-type field that stays a `Vec<String>` rather than a `Vec<GrantType>`:
+/// the document is deserialized from a remote source, so an unknown grant type has to survive
+/// deserialization long enough to be stripped. Making it an enum would reject the document at
+/// `serde` level and defeat `ignore_unknown_auth_flows` entirely. `GrantType` is still the
+/// single source of truth for what "supported" means.
 #[inline]
 pub fn validate_vec_grant_type(value: &[String]) -> Result<(), ValidationError> {
     for v in value {
-        if !RE_GRANT_TYPES.is_match(v) {
+        if GrantType::from_str(v).is_err() {
             return Err(ValidationError::new(
-                "^(authorization_code|client_credentials|urn:ietf:params:oauth:grant-type:device_code|password|refresh_token)$",
+                "^(authorization_code|client_credentials|urn:ietf:params:oauth:grant-type:device_code|urn:ietf:params:oauth:grant-type:token-exchange|password|refresh_token)$",
             ));
         }
     }
@@ -207,30 +192,53 @@ mod tests {
     }
 
     #[test]
-    fn grant_type_validators_reject_unknown_by_default() {
+    fn grant_type_validator_rejects_unknown_by_default() {
         // A spec-valid client (e.g. claude.ai) may advertise grant types Rauthy does not
-        // implement. By default BOTH validators reject them - DCR/admin/bootstrap store the
-        // list verbatim, and the ephemeral path only accepts unknown grants after they are
-        // stripped upstream (gated by `ephemeral_clients.ignore_unknown_auth_flows`).
+        // implement. The ephemeral path rejects them by default and only accepts such a
+        // document once they are stripped upstream, gated by
+        // `ephemeral_clients.ignore_unknown_auth_flows`.
+        //
+        // The admin / DCR / bootstrap side no longer needs a validator at all: those fields
+        // are `Vec<GrantType>`, so `serde` rejects an unknown grant type at deserialization.
+        // This is the one path where that cannot work, because the document is remote and the
+        // unknown value has to survive long enough to be stripped.
         let with_unknown = [
             "authorization_code",
             "refresh_token",
             "urn:ietf:params:oauth:grant-type:jwt-bearer",
         ]
         .map(String::from);
-        assert!(validate_vec_grant_types(&with_unknown).is_err());
         assert!(validate_vec_grant_type(&with_unknown).is_err());
 
-        // An all-supported list passes both validators.
-        let all_known = ["authorization_code", "refresh_token"].map(String::from);
-        assert!(validate_vec_grant_types(&all_known).is_ok());
+        // An all-supported list passes, including the extended-grant URNs.
+        let all_known = [
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "urn:ietf:params:oauth:grant-type:token-exchange",
+        ]
+        .map(String::from);
         assert!(validate_vec_grant_type(&all_known).is_ok());
 
-        // The plural validator rejects an explicitly empty list; the singular has no
-        // empty-check (an ephemeral document may legitimately omit grant_types).
+        // No empty-check here: an ephemeral document may legitimately omit `grant_types`.
         let empty: [String; 0] = [];
-        assert!(validate_vec_grant_types(&empty).is_err());
         assert!(validate_vec_grant_type(&empty).is_ok());
+    }
+
+    #[test]
+    fn grant_type_validator_tracks_the_enum() {
+        // `GrantType` is the single source of truth. If a variant is ever added, it must pass
+        // the ephemeral validator too, otherwise the two drift apart silently.
+        for gt in [
+            GrantType::AuthorizationCode,
+            GrantType::ClientCredentials,
+            GrantType::Password,
+            GrantType::RefreshToken,
+            GrantType::DeviceCode,
+            GrantType::TokenExchange,
+        ] {
+            assert!(validate_vec_grant_type(&[gt.to_string()]).is_ok(), "{gt}");
+        }
     }
 
     #[test]

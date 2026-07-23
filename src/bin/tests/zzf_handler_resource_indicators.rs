@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 use rauthy_api_types::clients::{
     ClientResponse, ClientSecretResponse, NewClientRequest, UpdateClientRequest,
 };
-use rauthy_api_types::oidc::{JwkKeyPairAlg, LoginRequest, TokenRequest};
+use rauthy_api_types::oidc::{GrantType, JwkKeyPairAlg, LoginRequest, TokenRequest};
 use rauthy_common::sha256;
 use rauthy_common::utils::{base64_url_encode, base64_url_no_pad_decode};
 use rauthy_service::token_set::TokenSet;
@@ -51,7 +51,7 @@ fn base_update() -> UpdateClientRequest {
         post_logout_redirect_uris: None,
         allowed_origins: None,
         enabled: true,
-        flows_enabled: vec!["client_credentials".to_string()],
+        flows_enabled: vec![GrantType::ClientCredentials],
         access_token_alg: JwkKeyPairAlg::EdDSA,
         id_token_alg: JwkKeyPairAlg::EdDSA,
         auth_code_lifetime: 60,
@@ -128,17 +128,10 @@ async fn test_resource_indicators() -> Result<(), Box<dyn Error>> {
 
     let url_token = format!("{backend_url}/oidc/token");
     let mut token_req = TokenRequest {
-        grant_type: "client_credentials".to_string(),
-        code: None,
-        redirect_uri: None,
+        grant_type: GrantType::ClientCredentials,
         client_id: Some(ID.to_string()),
         client_secret: Some(secret),
-        code_verifier: None,
-        device_code: None,
-        username: None,
-        password: None,
-        refresh_token: None,
-        resource: None,
+        ..Default::default()
     };
 
     // (1) no `resource` requested -> `aud` is an array containing the client and the
@@ -227,10 +220,7 @@ async fn test_resource_survives_authorize_refresh() -> Result<(), Box<dyn Error>
         post_logout_redirect_uris: None,
         allowed_origins: None,
         enabled: true,
-        flows_enabled: vec![
-            "authorization_code".to_string(),
-            "refresh_token".to_string(),
-        ],
+        flows_enabled: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
         access_token_alg: JwkKeyPairAlg::EdDSA,
         id_token_alg: JwkKeyPairAlg::EdDSA,
         auth_code_lifetime: 60,
@@ -294,7 +284,7 @@ async fn test_resource_survives_authorize_refresh() -> Result<(), Box<dyn Error>
     let (code, _state) = code_state_from_headers(res)?;
 
     let token_req = TokenRequest {
-        grant_type: "authorization_code".to_string(),
+        grant_type: GrantType::AuthorizationCode,
         code: Some(code),
         redirect_uri: Some(redirect_uri.clone()),
         client_id: Some(ID_REFRESH.to_string()),
@@ -305,6 +295,13 @@ async fn test_resource_survives_authorize_refresh() -> Result<(), Box<dyn Error>
         password: None,
         refresh_token: None,
         resource: Some(RES_REFRESH.to_string()),
+        subject_token: None,
+        subject_token_type: None,
+        actor_token: None,
+        actor_token_type: None,
+        requested_token_type: None,
+        audience: None,
+        scope: None,
     };
     let res = http
         .post(format!("{backend_url}/oidc/token"))
@@ -338,7 +335,7 @@ async fn test_resource_survives_authorize_refresh() -> Result<(), Box<dyn Error>
     let (code_refresh, _state) = code_state_from_headers(res)?;
 
     let token_req = TokenRequest {
-        grant_type: "authorization_code".to_string(),
+        grant_type: GrantType::AuthorizationCode,
         code: Some(code_refresh),
         redirect_uri: Some(redirect_uri.clone()),
         client_id: Some(ID_REFRESH.to_string()),
@@ -349,6 +346,13 @@ async fn test_resource_survives_authorize_refresh() -> Result<(), Box<dyn Error>
         password: None,
         refresh_token: None,
         resource: Some(RES_REFRESH.to_string()),
+        subject_token: None,
+        subject_token_type: None,
+        actor_token: None,
+        actor_token_type: None,
+        requested_token_type: None,
+        audience: None,
+        scope: None,
     };
     let res = http
         .post(format!("{backend_url}/oidc/token"))
