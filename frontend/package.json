@@ -6,7 +6,7 @@
         "dev": "vite dev",
         "build": "vite build",
         "preview": "vite preview",
-        "check": "./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+        "check": "./node_modules/.bin/svelte-kit sync && ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
         "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
         "test": "playwright test",
         "lint": "prettier --check . && eslint .",

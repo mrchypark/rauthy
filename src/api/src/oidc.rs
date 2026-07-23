@@ -10,16 +10,16 @@ use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder, ResponseError, g
 use chrono::Utc;
 use rauthy_api_types::oidc::{
     AuthRequest, CertsParams, DeviceAcceptedRequest, DeviceCodeResponse, DeviceGrantRequest,
-    DeviceVerifyRequest, DeviceVerifyResponse, JWKSCerts, JWKSPublicKeyCerts, LoginRefreshRequest,
-    LoginRequest, LogoutRequest, MfaChoiceResponse, OAuth2ErrorResponse, OAuth2ErrorTypeResponse,
-    SessionInfoResponse, TokenInfo, TokenRequest, TokenRevocationRequest, TokenValidationRequest,
+    DeviceVerifyRequest, DeviceVerifyResponse, GrantType, JWKSCerts, JWKSPublicKeyCerts,
+    LoginRefreshRequest, LoginRequest, LogoutRequest, MfaChoiceResponse, OAuth2ErrorResponse,
+    OAuth2ErrorTypeResponse, SessionInfoResponse, TokenInfo, TokenRequest, TokenRevocationRequest,
+    TokenValidationRequest,
 };
 use rauthy_api_types::sessions::SessionState;
 use rauthy_api_types::users::{OtpLoginResponse, Userinfo, WebauthnLoginResponse};
 use rauthy_common::compression::{compress_br_dyn, compress_gzip};
 use rauthy_common::constants::{
-    APPLICATION_JSON, COOKIE_MFA, GRANT_TYPE_DEVICE_CODE, HEADER_HTML, HEADER_RETRY_NOT_BEFORE,
-    PROVIDER_ATPROTO,
+    APPLICATION_JSON, COOKIE_MFA, HEADER_HTML, HEADER_RETRY_NOT_BEFORE, PROVIDER_ATPROTO,
 };
 use rauthy_common::utils::real_ip_from_req;
 use rauthy_data::api_cookie::ApiCookie;
@@ -587,7 +587,7 @@ pub async fn post_device_auth(
         });
     }
 
-    if let Err(err) = client.validate_flow(GRANT_TYPE_DEVICE_CODE) {
+    if let Err(err) = client.validate_flow(GrantType::DeviceCode) {
         return HttpResponse::Forbidden().json(OAuth2ErrorResponse {
             error: OAuth2ErrorTypeResponse::UnauthorizedClient,
             error_description: Some(err.message),
@@ -990,7 +990,7 @@ pub async fn get_session_xsrf(principal: ReqPrincipal) -> Result<HttpResponse, E
     ),
 )]
 #[post("/oidc/token")]
-#[tracing::instrument(level = "debug", skip_all, fields(grant_type = payload.grant_type))]
+#[tracing::instrument(level = "debug", skip_all, fields(grant_type = payload.grant_type.as_str()))]
 pub async fn post_token(
     req: HttpRequest,
     browser_id: BrowserId,
@@ -1000,7 +1000,7 @@ pub async fn post_token(
 
     let ip = real_ip_from_req(&req)?;
 
-    if payload.grant_type == GRANT_TYPE_DEVICE_CODE {
+    if payload.grant_type == GrantType::DeviceCode {
         // the `urn:ietf:params:oauth:grant-type:device_code` needs
         // a fully customized handling here with customized error response
         // to meet the oauth rfc
@@ -1008,7 +1008,7 @@ pub async fn post_token(
     }
 
     let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let has_password_been_hashed = payload.grant_type == "password";
+    let has_password_been_hashed = payload.grant_type == GrantType::Password;
 
     let res = match oidc::get_token_set(payload, browser_id, req).await {
         Ok((token_set, headers)) => {
@@ -1285,5 +1285,31 @@ pub async fn get_well_known() -> Result<HttpResponse, ErrorResponse> {
 // OIDC-only doc. Body is identical; we just expose it under the second path.
 #[get("/.well-known/oauth-authorization-server")]
 pub async fn get_well_known_oauth() -> Result<HttpResponse, ErrorResponse> {
+    well_known_response().await
+}
+
+// RFC 8414 §3.1 path-insertion alias for the AS-metadata document. Because
+// rauthy's issuer carries a path component (`https://<host>/auth/v1/`), an
+// RFC-compliant client forms the metadata URL by INSERTING
+// `/.well-known/oauth-authorization-server` between host and issuer path, i.e.
+// `https://<host>/.well-known/oauth-authorization-server/auth/v1`. claude.ai
+// probes exactly this path-insertion form; without it the request falls through
+// to the SPA catch-all (301 -> HTML), so the client never reads
+// `client_id_metadata_document_supported` and falls back to Dynamic Client
+// Registration. The `/auth/v1` segment is rauthy's fixed API mount prefix (see
+// the hardcoded issuer in `rauthy_config.rs`), so the route can be a constant.
+// Body is identical to `get_well_known_oauth`. See issue #1643.
+//
+// Both the trailing-slash and no-slash forms are served: the issuer path is
+// `/auth/v1/` (with a trailing slash), so a strict client may preserve it, while
+// claude.ai probes the no-slash form. rauthy runs no `NormalizePath` middleware,
+// so each exact path needs its own route.
+#[get("/.well-known/oauth-authorization-server/auth/v1")]
+pub async fn get_well_known_oauth_rfc8414() -> Result<HttpResponse, ErrorResponse> {
+    well_known_response().await
+}
+
+#[get("/.well-known/oauth-authorization-server/auth/v1/")]
+pub async fn get_well_known_oauth_rfc8414_trailing() -> Result<HttpResponse, ErrorResponse> {
     well_known_response().await
 }
