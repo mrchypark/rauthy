@@ -3,6 +3,7 @@ use crate::oidc::authorize::AuthorizeData;
 use actix_web::HttpRequest;
 use actix_web::cookie::Cookie;
 use rauthy_api_types::auth_providers::ProviderCallbackRequest;
+use rauthy_api_types::oidc::MfaLoginMethod;
 use rauthy_common::constants::{COOKIE_UPSTREAM_CALLBACK, PROVIDER_ATPROTO, PROVIDER_LINK_COOKIE};
 use rauthy_common::sha256;
 use rauthy_common::utils::base64_url_encode;
@@ -13,7 +14,9 @@ use rauthy_data::entity::auth_providers::{
     ProviderMfaLogin,
 };
 use rauthy_data::entity::clients::Client;
+use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::sessions::Session;
+use rauthy_data::rauthy_config::RauthyConfig;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use tracing::error;
 
@@ -98,10 +101,24 @@ pub async fn login_finish<'a>(
 
     // From here on, we deal with a normal login instead of just an account federation.
 
-    let require_webauthn = user.has_webauthn_enabled();
-    session
-        .set_mfa(provider_mfa_login == ProviderMfaLogin::Yes || require_webauthn)
-        .await?;
+    let provider_mfa_satisfied = provider_mfa_login == ProviderMfaLogin::Yes;
+    let (require_webauthn, may_require_otp) = local_factor_requirements(
+        provider_mfa_satisfied,
+        user.has_webauthn_enabled(),
+        RauthyConfig::get().vars.otp.enable,
+    );
+    let require_otp = may_require_otp && user.has_otp_enabled().await?;
+    if provider_mfa_satisfied {
+        session.auth_method = rauthy_data::entity::sessions::AuthMethod::Federated;
+        session.mfa_method = MfaMethod::Provider;
+        session.is_mfa = true;
+        session.upsert().await?;
+    } else {
+        session.auth_method = rauthy_data::entity::sessions::AuthMethod::Federated;
+        session.mfa_method = MfaMethod::Federated;
+        session.is_mfa = false;
+        session.upsert().await?;
+    }
 
     let client = Client::find_maybe_ephemeral(slf.req_client_id).await?;
     let header_origin = client.get_validated_origin_header(req)?;
@@ -122,6 +139,9 @@ pub async fn login_finish<'a>(
             resource: None,
             header_origin,
             require_webauthn,
+            require_otp,
+            has_totp: false,
+            mfa_method: require_webauthn.then_some(MfaLoginMethod::WebAuthn),
         },
         None,
         Some(provider_mfa_login),
@@ -132,4 +152,31 @@ pub async fn login_finish<'a>(
     let cookie = ApiCookie::build(COOKIE_UPSTREAM_CALLBACK, "", 0);
 
     Ok((auth_step, cookie, is_new_user))
+}
+
+fn local_factor_requirements(
+    provider_mfa_satisfied: bool,
+    has_webauthn: bool,
+    otp_enabled: bool,
+) -> (bool, bool) {
+    if provider_mfa_satisfied {
+        (false, false)
+    } else {
+        (has_webauthn, otp_enabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_factor_requirements;
+
+    #[test]
+    fn provider_mfa_completes_without_an_unusable_local_choice() {
+        assert_eq!(local_factor_requirements(true, true, true), (false, false));
+    }
+
+    #[test]
+    fn provider_without_mfa_preserves_local_passkey_precedence() {
+        assert_eq!(local_factor_requirements(false, true, true), (true, true));
+    }
 }

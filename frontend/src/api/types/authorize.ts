@@ -1,3 +1,5 @@
+import type { OtpKind } from './otp';
+
 export type CodeChallengeMethod = 'plain' | 'S256';
 export type JwtTokenType = 'Bearer' | 'DPoP' | 'Id' | 'Refresh';
 
@@ -57,6 +59,22 @@ export interface RequestResetRequest {
 //     expires_in: number,
 //     refresh_token?: string,
 // }
+
+export interface ActiveOtp {
+    otp_id: string;
+    otp_kind: OtpKind;
+}
+
+export interface OtpLoginResponse {
+    code: string;
+    active_otps: ActiveOtp[];
+}
+
+export type MfaLoginMethod = 'webauthn' | 'totp';
+
+export interface MfaChoiceResponse {
+    methods: MfaLoginMethod[];
+}
 
 export interface WebauthnLoginResponse {
     code: string;

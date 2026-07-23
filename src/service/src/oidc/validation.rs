@@ -109,7 +109,7 @@ pub async fn validate_and_refresh_token(
     let (_, validation_str) = refresh_token.split_at(refresh_token.len() - 49);
     let now = Utc::now().timestamp();
     let exp_at_secs = now + RauthyConfig::get().vars.lifetimes.refresh_token_grace_time as i64;
-    let rt_scope = if let Some(device_id) = &claims.common.did {
+    let (rt_scope, mfa_method, auth_method) = if let Some(device_id) = &claims.common.did {
         let mut rt = RefreshTokenDevice::find(validation_str).await?;
 
         if &rt.device_id != device_id {
@@ -129,16 +129,15 @@ pub async fn validate_and_refresh_token(
             rt.exp = exp_at_secs;
             rt.save().await?;
         }
-        rt.scope
+        (rt.scope, rt.mfa_method, rt.auth_method)
     } else {
         let mut rt = RefreshToken::find(validation_str).await?;
         if rt.exp > exp_at_secs + 1 {
             rt.exp = exp_at_secs;
             rt.save().await?;
         }
-        rt.scope
+        (rt.scope, rt.mfa_method, rt.auth_method)
     };
-
     // at this point, everything has been validated -> we can issue a new TokenSet safely
     debug!("Refresh Token - all good!");
 
@@ -169,6 +168,8 @@ pub async fn validate_and_refresh_token(
         claims.resource.map(String::from),
         AuthCodeFlow::No,
         DeviceCodeFlow::No,
+        mfa_method,
+        auth_method,
     )
     .await?;
 

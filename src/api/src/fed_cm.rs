@@ -14,6 +14,7 @@ use rauthy_data::entity::fed_cm::{
     FedCMAccount, FedCMAccounts, FedCMClientMetadata, FedCMIdPConfig, FedCMLoginStatus,
     FedCMTokenResponse, WebIdentity,
 };
+use rauthy_data::entity::sessions::MfaMethod;
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::users::User;
 use rauthy_data::rauthy_config::RauthyConfig;
@@ -298,6 +299,8 @@ pub async fn post_fed_cm_token(
         None,
         AuthCodeFlow::No,
         DeviceCodeFlow::No,
+        MfaMethod::Federated,
+        rauthy_data::entity::sessions::AuthMethod::Federated,
     )
     .await?;
 

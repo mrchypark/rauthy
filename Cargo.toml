@@ -177,6 +177,7 @@ tracing-subscriber = { version = "0.3", features = [
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4"] }
 tokio-postgres-rustls = { version = "0.14", features = [] }
+totp-rs = { version = "5.7.2", features = ["gen_secret", "otpauth", "qr", "zeroize"] }
 utoipa = { version = "5", features = [
     "actix_extras", "chrono", "openapi_extensions"
 ] }

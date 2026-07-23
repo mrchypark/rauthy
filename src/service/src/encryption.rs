@@ -5,6 +5,7 @@ use rauthy_data::entity::clients::Client;
 use rauthy_data::entity::clients_scim::ClientScim;
 use rauthy_data::entity::jwk::JWKS;
 use rauthy_data::entity::kv::{KVAccess, KVValue};
+use rauthy_data::entity::one_time_password::OneTimePassword;
 use rauthy_error::ErrorResponse;
 use tracing::{error, info};
 
@@ -74,6 +75,18 @@ pub async fn migrate_encryption_alg(new_kid: &str) -> Result<(), ErrorResponse> 
         modified += 1;
     }
     info!("Finished ApiKeys migration to key id: {new_kid}");
+
+    // migrate OTP seeds
+    info!("Starting OTP secret migration to key id: {new_kid}");
+    for mut otp in OneTimePassword::find_all()
+        .await?
+        .into_iter()
+        .filter(|otp| otp.enc_key_id != new_kid)
+    {
+        otp.re_encrypt_secret(new_kid).await?;
+        modified += 1;
+    }
+    info!("Finished OTP secret migration to key id: {new_kid}");
 
     // migrate auth providers
     let providers = AuthProvider::find_all().await?;

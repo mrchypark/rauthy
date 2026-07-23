@@ -66,7 +66,7 @@ export const I18nNl: I18n = {
         accessRenew: 'Toegang verlengbaar tot',
         accessRenewDelete: 'Mogelijkheid tot verlengen verwijderen',
         birthdate: 'Geboortedatum',
-        canModifyFor: 'Passkeys kunnen worden gewijzigd voor:',
+        canModifyFor: 'MFA kunnen worden gewijzigd voor:',
         city: 'Stad',
         changePassword: 'Wachtwoord wijzigen',
         convertAccount: 'Account omzetten',
@@ -170,11 +170,13 @@ export const I18nNl: I18n = {
         emailRequired: 'E-Mail is verplicht',
         emailSentMsg: 'Als uw e-mailadres bestaat, is er een verzoek verstuurd',
         expectingPasskey: 'Passkey-authenticatie verwacht',
+        expectingOtp: 'Expecting OTP Authentication',
         http429: 'Te veel ongeldige invoeren. Vergrendeld tot:',
         invalidCredentials: 'Ongeldige inloggegevens',
         invalidKeyUsed: 'Ongeldige sleutel',
         login: 'Inloggen',
         mfaAck: 'Bevestigd',
+        chooseMfa: 'Choose a verification method',
         navigateToAccount: 'Account Dashboard',
         needsUserUpdate: `Sommige informatie voor dit account ontbreekt. U moet deze waarden
             bijwerken voordat u kunt doorgaan met inloggen.`,
@@ -228,24 +230,56 @@ export const I18nNl: I18n = {
         cancel: 'Annuleren',
     },
     mfa: {
-        p1: `Als u van plan bent uw MFA-sleutel te gebruiken met meerdere systemen zoals Windows en
-            Android, doe dan de registratie met Android.`,
-        p2: `Android is het platform met de minste ondersteunde functies voor de wachtwoordloze
-            technologie. Sleutels die u registreert met Android werken ook elders. Dit geldt echter
-            niet andersom.`,
-        p3: 'Voor meer informatie, zie',
-        docLinkText: 'de documentatie over passkeys',
+        webauthn: {
+            title: 'Passkeys',
+            p1: `Als u van plan bent uw MFA-sleutel te gebruiken met meerdere systemen zoals Windows en
+                Android, doe dan de registratie met Android.`,
+            p2: `Android is het platform met de minste ondersteunde functies voor de wachtwoordloze
+                technologie. Sleutels die u registreert met Android werken ook elders. Dit geldt echter
+                niet andersom.`,
+            p3: 'Voor meer informatie, zie',
+            docLinkText: 'de documentatie over passkeys',
+            unsupportedText:
+                'Your browser does not support Webauthn credentials and must be updated.',
+        },
+        otp: {
+            title: 'One time password',
+            titleEmail: 'Email-based OTP',
+            titleTime: 'Authenticator app',
+            activationCode: 'Please enter the OTP code that was sent to your email address.',
+            code: 'One Time Password',
+            chooseKind: 'Choose a verification method',
+            emailDescription: 'Receive a code at your email address.',
+            timeDescription: 'Use a time-based code from an authenticator app.',
+            factorName: 'Factor name',
+            factorNamePlaceholder: 'For example, Personal phone',
+            timeSetup:
+                'Scan this QR code with your authenticator app, then enter its 6-digit code.',
+            qrAlt: 'QR code for adding Rauthy to an authenticator app',
+            manualSecret: 'Cannot scan? Enter this setup key manually:',
+            expiresIn: 'This setup expires in',
+            expired: 'This authenticator setup expired. Start again to create a new QR code.',
+            registered: 'Your one-time password method is ready.',
+            verify: 'Verify',
+            continue: 'Continue',
+            unnamed: 'Unnamed factor',
+            loginEmail: 'Enter the code sent to your email address.',
+            loginTime: 'Enter the current 6-digit code from your authenticator app.',
+        },
         errorReg: 'Fout bij het starten van het registratieproces',
         lastUsed: 'Laatst gebruikt',
         noKey: 'Geen beveiligingssleutel geregistreerd op deze plek',
-        reAuthenticatePasskey: `Voordat u Passkeys kunt wijzigen, moet u authenticeren met een
+        reAuthenticatePasskey: `Voordat u MFA kunt wijzigen, moet u authenticeren met een
             reeds geregistreerde:`,
         reAuthenticatePwd:
-            'Voordat u Passkeys kunt wijzigen, moet u opnieuw authenticeren met uw wachtwoord.',
+            'Voordat u MFA kunt wijzigen, moet u opnieuw authenticeren met uw wachtwoord.',
+        reAuthenticateOtp:
+            'Before you can modify your MFA, you need to re-authenticate with an OTP:',
         register: 'Registreren',
         registerNew: 'Nieuwe sleutel registreren',
         registerd: 'Geregistreerd',
         registerdKeys: 'Geregistreerde sleutels',
+        registerdOtps: 'Registered OTPs',
         passkeyName: 'Passkey naam',
         passkeyNameErr: '2 - 32 tekens zonder speciale tekens',
         passwordInvalid: 'Ongeldig wachtwoord',

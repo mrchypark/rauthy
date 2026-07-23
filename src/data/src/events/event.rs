@@ -165,6 +165,11 @@ pub enum EventType {
     TokenIssued,
     CredentialStuffing,
     EmailSendError,
+    OtpEnrollment,
+    OtpDeletion,
+    OtpAdminReset,
+    OtpReplayRejected,
+    OtpVerifyFailed,
 }
 
 impl Display for EventType {
@@ -194,6 +199,11 @@ impl Display for EventType {
             Self::TokenIssued => write!(f, "JWT Token issued"),
             Self::CredentialStuffing => write!(f, "Possible credential stuffing"),
             Self::EmailSendError => write!(f, "E-Mail send error"),
+            Self::OtpEnrollment => write!(f, "OTP enrolled"),
+            Self::OtpDeletion => write!(f, "OTP deleted"),
+            Self::OtpAdminReset => write!(f, "OTP reset by administrator"),
+            Self::OtpReplayRejected => write!(f, "OTP replay rejected"),
+            Self::OtpVerifyFailed => write!(f, "OTP verification failed"),
         }
     }
 }
@@ -227,6 +237,11 @@ impl From<rauthy_api_types::events::EventType> for EventType {
             rauthy_api_types::events::EventType::TokenIssued => Self::TokenIssued,
             rauthy_api_types::events::EventType::CredentialStuffing => Self::CredentialStuffing,
             rauthy_api_types::events::EventType::EmailSendError => Self::EmailSendError,
+            rauthy_api_types::events::EventType::OtpEnrollment => Self::OtpEnrollment,
+            rauthy_api_types::events::EventType::OtpDeletion => Self::OtpDeletion,
+            rauthy_api_types::events::EventType::OtpAdminReset => Self::OtpAdminReset,
+            rauthy_api_types::events::EventType::OtpReplayRejected => Self::OtpReplayRejected,
+            rauthy_api_types::events::EventType::OtpVerifyFailed => Self::OtpVerifyFailed,
         }
     }
 }
@@ -258,6 +273,11 @@ impl From<EventType> for rauthy_api_types::events::EventType {
             EventType::TokenIssued => Self::TokenIssued,
             EventType::CredentialStuffing => Self::CredentialStuffing,
             EventType::EmailSendError => Self::EmailSendError,
+            EventType::OtpEnrollment => Self::OtpEnrollment,
+            EventType::OtpDeletion => Self::OtpDeletion,
+            EventType::OtpAdminReset => Self::OtpAdminReset,
+            EventType::OtpReplayRejected => Self::OtpReplayRejected,
+            EventType::OtpVerifyFailed => Self::OtpVerifyFailed,
         }
     }
 }
@@ -289,6 +309,11 @@ impl EventType {
             Self::TokenIssued => "TokenIssued",
             Self::CredentialStuffing => "CredentialStuffing",
             Self::EmailSendError => "EmailSendError",
+            Self::OtpEnrollment => "OtpEnrollment",
+            Self::OtpDeletion => "OtpDeletion",
+            Self::OtpAdminReset => "OtpAdminReset",
+            Self::OtpReplayRejected => "OtpReplayRejected",
+            Self::OtpVerifyFailed => "OtpVerifyFailed",
         }
     }
 
@@ -321,6 +346,11 @@ impl EventType {
             EventType::TokenIssued => 21,
             EventType::CredentialStuffing => 22,
             EventType::EmailSendError => 23,
+            EventType::OtpEnrollment => 24,
+            EventType::OtpDeletion => 25,
+            EventType::OtpAdminReset => 26,
+            EventType::OtpReplayRejected => 27,
+            EventType::OtpVerifyFailed => 28,
         }
     }
 }
@@ -352,6 +382,11 @@ impl From<String> for EventType {
             "TokenIssued" => Self::TokenIssued,
             "CredentialStuffing" => Self::CredentialStuffing,
             "EmailSendError" => Self::EmailSendError,
+            "OtpEnrollment" => Self::OtpEnrollment,
+            "OtpDeletion" => Self::OtpDeletion,
+            "OtpAdminReset" => Self::OtpAdminReset,
+            "OtpReplayRejected" => Self::OtpReplayRejected,
+            "OtpVerifyFailed" => Self::OtpVerifyFailed,
             // just return test to never panic
             s => {
                 error!("EventType::from() for invalid String: {s}");
@@ -394,6 +429,11 @@ impl From<i64> for EventType {
             21 => EventType::TokenIssued,
             22 => EventType::CredentialStuffing,
             23 => EventType::EmailSendError,
+            24 => EventType::OtpEnrollment,
+            25 => EventType::OtpDeletion,
+            26 => EventType::OtpAdminReset,
+            27 => EventType::OtpReplayRejected,
+            28 => EventType::OtpVerifyFailed,
             _ => EventType::Test,
         }
     }
@@ -505,6 +545,11 @@ impl From<&Event> for Notification {
                 value.ip.as_deref().unwrap_or_default()
             )),
             EventType::EmailSendError => value.text.clone(),
+            EventType::OtpEnrollment
+            | EventType::OtpDeletion
+            | EventType::OtpAdminReset
+            | EventType::OtpReplayRejected
+            | EventType::OtpVerifyFailed => value.text.clone(),
         };
 
         Self {
@@ -726,6 +771,76 @@ impl Event {
             None,
             None,
             Some(format!("{typ} -> {address}")),
+        )
+    }
+
+    fn otp_event(
+        typ: EventType,
+        level: EventLevel,
+        user_id: &str,
+        kind: &str,
+        ip: IpAddr,
+        actor: Option<&str>,
+    ) -> Self {
+        let text = match actor {
+            Some(actor) => format!("user={user_id} kind={kind} actor={actor}"),
+            None => format!("user={user_id} kind={kind}"),
+        };
+        Self::new(level, typ, Some(ip.to_string()), None, Some(text))
+    }
+
+    pub fn otp_enrollment(user_id: &str, kind: &str, ip: IpAddr) -> Self {
+        Self::otp_event(
+            EventType::OtpEnrollment,
+            EventLevel::Info,
+            user_id,
+            kind,
+            ip,
+            None,
+        )
+    }
+
+    pub fn otp_deletion(user_id: &str, kind: &str, ip: IpAddr) -> Self {
+        Self::otp_event(
+            EventType::OtpDeletion,
+            EventLevel::Notice,
+            user_id,
+            kind,
+            ip,
+            None,
+        )
+    }
+
+    pub fn otp_admin_reset(user_id: &str, kind: &str, ip: IpAddr, actor: &str) -> Self {
+        Self::otp_event(
+            EventType::OtpAdminReset,
+            EventLevel::Warning,
+            user_id,
+            kind,
+            ip,
+            Some(actor),
+        )
+    }
+
+    pub fn otp_replay_rejected(user_id: &str, kind: &str, ip: IpAddr) -> Self {
+        Self::otp_event(
+            EventType::OtpReplayRejected,
+            EventLevel::Warning,
+            user_id,
+            kind,
+            ip,
+            None,
+        )
+    }
+
+    pub fn otp_verify_failed(user_id: &str, kind: &str, ip: IpAddr) -> Self {
+        Self::otp_event(
+            EventType::OtpVerifyFailed,
+            EventLevel::Warning,
+            user_id,
+            kind,
+            ip,
+            None,
         )
     }
 
@@ -1061,6 +1176,11 @@ impl Event {
             EventType::LoginNewLocation => self.text.clone().unwrap_or_default(),
             EventType::TokenIssued => self.text.clone().unwrap_or_default(),
             EventType::EmailSendError => self.text.clone().unwrap_or_default(),
+            EventType::OtpEnrollment
+            | EventType::OtpDeletion
+            | EventType::OtpAdminReset
+            | EventType::OtpReplayRejected
+            | EventType::OtpVerifyFailed => self.text.clone().unwrap_or_default(),
         }
     }
 

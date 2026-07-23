@@ -4,6 +4,7 @@ use crate::entity::clients_dyn::ClientDyn;
 use crate::entity::clients_scim::ClientScim;
 use crate::entity::jwk::JwkKeyPairAlg;
 use crate::entity::scopes::Scope;
+use crate::entity::sessions::MfaMethod;
 use crate::entity::users::User;
 use crate::rauthy_config::RauthyConfig;
 use actix_web::HttpRequest;
@@ -1196,17 +1197,32 @@ impl Client {
     /// possible without MFA. The force MFA for the Rauthy admin UI is done in
     /// Principal::validate_admin_session() depending on the `ADMIN_FORCE_MFA` config variable.
     #[inline]
-    pub fn validate_mfa(
+    pub async fn validate_mfa(
         &self,
         user: &User,
         provider_mfa_login: Option<ProviderMfaLogin>,
     ) -> Result<(), ErrorResponse> {
         let force_mfa = self.id != "rauthy" && self.force_mfa;
-        let has_mfa =
-            user.has_webauthn_enabled() || provider_mfa_login == Some(ProviderMfaLogin::Yes);
+        let has_mfa = user.has_webauthn_enabled()
+            || provider_mfa_login == Some(ProviderMfaLogin::Yes)
+            || (RauthyConfig::get().vars.otp.enable
+                && user.has_otp_enabled().await.unwrap_or_default());
 
         if force_mfa && !has_mfa {
             trace!("MFA required for this client but the user has none");
+            Err(ErrorResponse::new(
+                ErrorResponseType::MfaRequired,
+                "MFA is required for this client",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Enforces `force_mfa` from proof recorded on the current session.
+    #[inline]
+    pub fn validate_mfa_method(&self, method: MfaMethod) -> Result<(), ErrorResponse> {
+        if self.id != "rauthy" && self.force_mfa && !method.is_mfa() {
             Err(ErrorResponse::new(
                 ErrorResponseType::MfaRequired,
                 "MFA is required for this client",
@@ -2175,5 +2191,17 @@ mod tests {
         client.delete_scope("groups");
         assert_eq!(&client.scopes, "openid");
         assert_eq!(&client.default_scopes, "openid");
+    }
+
+    #[test]
+    fn force_mfa_accepts_only_a_verified_session_method() {
+        let mut client = Client::default();
+        client.id = "target-client".to_string();
+        client.force_mfa = true;
+
+        assert!(client.validate_mfa_method(MfaMethod::None).is_err());
+        assert!(client.validate_mfa_method(MfaMethod::Totp).is_ok());
+        assert!(client.validate_mfa_method(MfaMethod::WebAuthn).is_ok());
+        assert!(client.validate_mfa_method(MfaMethod::Provider).is_ok());
     }
 }

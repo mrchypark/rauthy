@@ -275,6 +275,7 @@ pub struct Vars {
     pub logging: VarsLogging,
     pub matrix: VarsMatrix,
     pub mfa: VarsMfa,
+    pub otp: VarsOtp,
     pub pam: VarsPam,
     pub pow: VarsPow,
     pub scim: VarsScim,
@@ -572,6 +573,17 @@ impl Default for Vars {
             },
             mfa: VarsMfa {
                 admin_force_mfa: true,
+            },
+            otp: VarsOtp {
+                enable: false,
+                length: 6,
+                exp: 5,
+                renew_exp: 2160,
+                default_digest_len: 512,
+                email: VarsOtpEmail {
+                    enable: false,
+                },
+                time: VarsOtpTime { enable: false },
             },
             pam: VarsPam {
                 remote_password_len: 24,
@@ -1021,6 +1033,125 @@ Your account has not been compromised and no data was leaked."#.into()),
                         button_text_request_new: Some("Request password reset Link".into()),
                     },
                 },
+                email_otp: VarsTemplatesLanguages {
+                    de: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    en: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    fr: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    ko: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    nb: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    nl: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    ru: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    uk: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                    zhhans: VarsTemplate {
+                        subject: "One Time Password".into(),
+                        header: "One Time Password for".into(),
+                        text: Some("You will find your OTP code below.".into()),
+                        click_link: None,
+                        validity:
+                        Some("This code is only valid for a short period of time for security reasons."
+                                .into()),
+                        expires: Some("Code expires: ".into()),
+                        button: None,
+                        footer: Some("If this code has expired, you can request a new one.".into()),
+                        button_text_request_new: None,
+                    },
+                },
             },
             tls: VarsTls {
                 cert_path: None,
@@ -1147,6 +1278,7 @@ impl Vars {
         slf.parse_fedcm(&mut table);
         slf.parse_geo(&mut table, &mut secrets);
         slf.parse_hashing(&mut table);
+        slf.parse_otp(&mut table);
         slf.parse_http_client(&mut table);
         slf.parse_i18n(&mut table);
         slf.parse_lifetimes(&mut table);
@@ -2654,6 +2786,46 @@ impl Vars {
         }
     }
 
+    fn parse_otp(&mut self, table: &mut toml::Table) {
+        // [otp]
+        let mut table = t_table(table, "otp");
+        if let Some(v) = t_bool(&mut table, "otp", "enable", "OTP_ENABLE") {
+            self.otp.enable = v;
+        }
+        if let Some(v) = t_u8(&mut table, "otp", "length", "OTP_LENGTH") {
+            self.otp.length = v;
+        }
+        if let Some(v) = t_u16(&mut table, "otp", "exp", "OTP_EXP") {
+            self.otp.exp = v;
+        }
+        if let Some(v) = t_u16(&mut table, "otp", "renew_exp", "OTP_RENEW_EXP") {
+            self.otp.renew_exp = v;
+        }
+        if let Some(v) = t_u16(
+            &mut table,
+            "otp",
+            "default_digest_len",
+            "OTP_DEFAULT_DIGEST_LEN",
+        ) {
+            self.otp.default_digest_len = v;
+        }
+
+        // [otp.email]
+        let mut email = t_table(&mut table, "email");
+        if let Some(v) = t_bool(&mut email, "otp.email", "enable", "OTP_EMAIL_ENABLE") {
+            self.otp.email.enable = v;
+        }
+        check_table_empty(email, "otp.email");
+
+        // [otp.time]
+        let mut time = t_table(&mut table, "time");
+        if let Some(v) = t_bool(&mut time, "otp.time", "enable", "OTP_TIME_ENABLE") {
+            self.otp.time.enable = v;
+        }
+        check_table_empty(time, "otp.time");
+        check_table_empty(table, "otp");
+    }
+
     fn parse_http_client(&mut self, table: &mut toml::Table) {
         let mut table = t_table(table, "http_client");
 
@@ -3543,6 +3715,7 @@ impl Vars {
     }
 
     pub fn validate(&self) {
+        self.otp.validate();
         if !self.database.hiqlite
             && (self.database.pg_host.is_none()
                 || self.database.pg_user.is_none()
@@ -3950,6 +4123,41 @@ pub struct VarsMfa {
 }
 
 #[derive(Debug)]
+pub struct VarsOtp {
+    pub enable: bool,
+    pub length: u8,
+    pub exp: u16,
+    pub renew_exp: u16,
+    pub default_digest_len: u16,
+    pub email: VarsOtpEmail,
+    pub time: VarsOtpTime,
+}
+
+#[derive(Debug)]
+pub struct VarsOtpEmail {
+    pub enable: bool,
+}
+
+#[derive(Debug)]
+pub struct VarsOtpTime {
+    pub enable: bool,
+}
+
+impl VarsOtp {
+    pub fn validate(&self) {
+        if !(6..=8).contains(&self.length) {
+            panic!("otp.length must be between 6 and 8");
+        }
+        if self.exp == 0 {
+            panic!("otp.exp must be greater than 0");
+        }
+        if !matches!(self.default_digest_len, 256 | 384 | 512) {
+            panic!("otp.default_digest_len must be 256, 384, or 512");
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct VarsPam {
     pub remote_password_len: u8,
     pub remote_password_ttl: u16,
@@ -4010,6 +4218,7 @@ pub struct VarsTemplates {
     pub password_new: VarsTemplatesLanguages,
     pub password_reset: VarsTemplatesLanguages,
     pub email_registered_already: VarsTemplatesLanguages,
+    pub email_otp: VarsTemplatesLanguages,
 }
 
 #[derive(Debug)]
@@ -4135,6 +4344,47 @@ pub struct VarsWebauthn {
     pub renew_exp: u16,
     pub force_uv: bool,
     pub no_password_exp: bool,
+}
+
+#[cfg(test)]
+mod otp_tests {
+    use super::{VarsOtp, VarsOtpEmail, VarsOtpTime};
+
+    fn otp(length: u8, exp: u16, digest: u16) -> VarsOtp {
+        VarsOtp {
+            enable: true,
+            length,
+            exp,
+            renew_exp: 0,
+            default_digest_len: digest,
+            email: VarsOtpEmail { enable: true },
+            time: VarsOtpTime { enable: true },
+        }
+    }
+
+    #[test]
+    fn otp_config_accepts_supported_boundaries() {
+        otp(6, 1, 256).validate();
+        otp(8, 1, 512).validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "otp.length must be between 6 and 8")]
+    fn otp_config_rejects_invalid_length() {
+        otp(5, 1, 256).validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "otp.exp must be greater than 0")]
+    fn otp_config_rejects_zero_expiration() {
+        otp(6, 0, 256).validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "otp.default_digest_len must be 256, 384, or 512")]
+    fn otp_config_rejects_unsupported_digest() {
+        otp(6, 1, 1).validate();
+    }
 }
 
 #[derive(Debug)]

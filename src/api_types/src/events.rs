@@ -37,6 +37,11 @@ pub enum EventType {
     TokenIssued,
     CredentialStuffing,
     EmailSendError,
+    OtpEnrollment,
+    OtpDeletion,
+    OtpAdminReset,
+    OtpReplayRejected,
+    OtpVerifyFailed,
 }
 
 #[derive(Deserialize, Validate, ToSchema, IntoParams)]

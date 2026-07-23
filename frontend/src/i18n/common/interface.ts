@@ -140,6 +140,7 @@ export interface I18n {
         invalidKeyUsed: string;
         login: string;
         mfaAck: string;
+        chooseMfa: string;
         navigateToAccount: string;
         needsUserUpdate: string;
         orLoginWith: string;
@@ -151,6 +152,7 @@ export interface I18n {
         passwordResetDesc: string;
         passwordResetSuccess: string;
         expectingPasskey: string;
+        expectingOtp: string;
         requestExpires: string;
         requestExpired: string;
         signUp: string;
@@ -190,20 +192,50 @@ export interface I18n {
         cancel: string;
     };
     mfa: {
-        p1: string;
-        p2: string;
-        p3: string;
-        docLinkText: string;
+        webauthn: {
+            title: string;
+            p1: string;
+            p2: string;
+            p3: string;
+            docLinkText: string;
+            unsupportedText: string;
+        };
+
+        otp: {
+            title: string;
+            titleEmail: string;
+            titleTime: string;
+            activationCode: string;
+            code: string;
+            chooseKind: string;
+            emailDescription: string;
+            timeDescription: string;
+            factorName: string;
+            factorNamePlaceholder: string;
+            timeSetup: string;
+            qrAlt: string;
+            manualSecret: string;
+            expiresIn: string;
+            expired: string;
+            registered: string;
+            verify: string;
+            continue: string;
+            unnamed: string;
+            loginEmail: string;
+            loginTime: string;
+        };
 
         errorReg: string;
         lastUsed: string;
         noKey: string;
         reAuthenticatePasskey: string;
         reAuthenticatePwd: string;
+        reAuthenticateOtp: string;
         register: string;
         registerNew: string;
         registerd: string;
         registerdKeys: string;
+        registerdOtps: string;
         passkeyName: string;
         passkeyNameErr: string;
         passwordInvalid: string;

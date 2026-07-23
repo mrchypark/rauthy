@@ -8,6 +8,7 @@ use rauthy_data::entity::jwk::{JwkKeyPair, JwkKeyPairAlg};
 use rauthy_data::entity::refresh_tokens::RefreshToken;
 use rauthy_data::entity::refresh_tokens_devices::RefreshTokenDevice;
 use rauthy_data::entity::scopes::Scope;
+use rauthy_data::entity::sessions::{AuthMethod, MfaMethod};
 use rauthy_data::entity::user_attr::UserAttrValueEntity;
 use rauthy_data::entity::users::User;
 use rauthy_data::entity::users_values::UserValues;
@@ -15,8 +16,7 @@ use rauthy_data::entity::webids::WebId;
 use rauthy_data::rauthy_config::RauthyConfig;
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use rauthy_jwt::claims::{
-    JwtAccessClaims, JwtAmrValue, JwtCommonClaims, JwtIdClaims, JwtTokenType,
-    validate_no_reserved_collision,
+    JwtAccessClaims, JwtCommonClaims, JwtIdClaims, JwtTokenType, validate_no_reserved_collision,
 };
 use rauthy_jwt::token::JwtToken;
 use ring::digest;
@@ -109,6 +109,24 @@ pub struct TokenNonce(pub String);
 
 /// Contains the scopes as a single String separated by `\s`
 pub struct TokenScopes(pub String);
+
+/// OIDC Core delegates concrete values to the IANA AMR registry. We emit the
+/// verified factor (`otp`) plus `mfa`; WebAuthn is represented conservatively
+/// as `mfa` because a platform or synced passkey is not necessarily hardware
+/// protected. `pwd` is included only when the local flow required it.
+fn amr_values(auth: AuthMethod, mfa: MfaMethod) -> Vec<&'static str> {
+    let mut values = Vec::with_capacity(3);
+    if auth == AuthMethod::Password {
+        values.push("pwd");
+    }
+    match mfa {
+        MfaMethod::Totp => values.push("otp"),
+        MfaMethod::WebAuthn | MfaMethod::Provider | MfaMethod::Legacy => {}
+        MfaMethod::None | MfaMethod::Federated => return values,
+    }
+    values.push("mfa");
+    values
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TokenSet {
@@ -299,14 +317,13 @@ impl TokenSet {
         scope_customs: Option<(Vec<&Scope>, &Option<HashMap<String, Vec<u8>>>)>,
         sid: Option<SessionId>,
         auth_code_flow: AuthCodeFlow,
+        mfa_method: MfaMethod,
+        auth_method: AuthMethod,
     ) -> Result<String, ErrorResponse> {
         let config = RauthyConfig::get();
 
-        let amr = if user.has_webauthn_enabled() && auth_code_flow == AuthCodeFlow::Yes {
-            JwtAmrValue::Mfa.as_str()
-        } else {
-            JwtAmrValue::Pwd.as_str()
-        };
+        let _ = auth_code_flow;
+        let amr = amr_values(auth_method, mfa_method);
         // Solid-OIDC ephemeral clients additionally carry the `solid` audience.
         let aud = if client.is_ephemeral() && config.vars.ephemeral_clients.enable_solid_aud {
             Audience::Multiple(vec![
@@ -340,7 +357,7 @@ impl TokenSet {
                     .as_ref()
                     .map(|jkt| JktClaim { jkt: &jkt.0 }),
             },
-            amr: vec![amr],
+            amr,
             auth_time: auth_time.get(),
             at_hash: at_hash.0.as_str(),
             sid: sid.as_ref().map(|sid| sid.0.as_str()),
@@ -457,7 +474,8 @@ impl TokenSet {
         auth_time: AuthTime,
         access_token_lifetime: i64,
         scope: Option<TokenScopes>,
-        is_mfa: bool,
+        mfa_method: MfaMethod,
+        auth_method: AuthMethod,
         device_code_flow: DeviceCodeFlow,
         sid: Option<SessionId>,
         resource: Option<&str>,
@@ -526,6 +544,8 @@ impl TokenSet {
                 nbf,
                 exp,
                 scope.map(|s| s.0),
+                mfa_method,
+                auth_method,
                 Some(jti.0),
             )
             .await?;
@@ -536,7 +556,8 @@ impl TokenSet {
                 nbf,
                 exp,
                 scope.map(|s| s.0),
-                is_mfa,
+                mfa_method,
+                auth_method,
                 sid.map(|s| s.0),
                 Some(jti.0),
             )
@@ -591,6 +612,8 @@ impl TokenSet {
         resource: Option<String>,
         auth_code_flow: AuthCodeFlow,
         device_code_flow: DeviceCodeFlow,
+        mfa_method: MfaMethod,
+        auth_method: AuthMethod,
     ) -> Result<Self, ErrorResponse> {
         let scopes = scopes.map(|s| s.0);
         let scope = if let Some(s) = &scopes {
@@ -701,6 +724,8 @@ impl TokenSet {
             customs_id,
             sid.clone(),
             auth_code_flow,
+            mfa_method,
+            auth_method,
         )
         .await?;
         let refresh_token = if client.allow_refresh_token() {
@@ -712,7 +737,8 @@ impl TokenSet {
                     auth_time,
                     lifetime,
                     scopes.map(TokenScopes),
-                    user.has_webauthn_enabled(),
+                    mfa_method,
+                    auth_method,
                     device_code_flow,
                     sid,
                     resource.as_deref(),
@@ -737,6 +763,79 @@ impl TokenSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rauthy_data::entity::sessions::{AuthMethod, MfaMethod};
+
+    #[test]
+    fn amr_uses_the_verified_totp_method() {
+        assert_eq!(
+            amr_values(AuthMethod::Password, MfaMethod::Totp),
+            vec!["pwd", "otp", "mfa"]
+        );
+    }
+
+    #[test]
+    fn amr_uses_the_verified_webauthn_method() {
+        assert_eq!(
+            amr_values(AuthMethod::Password, MfaMethod::WebAuthn),
+            vec!["pwd", "mfa"]
+        );
+    }
+
+    #[test]
+    fn passkey_only_amr_does_not_claim_a_password() {
+        assert_eq!(
+            amr_values(AuthMethod::Passkey, MfaMethod::WebAuthn),
+            vec!["mfa"]
+        );
+    }
+
+    #[test]
+    fn provider_mfa_amr_does_not_claim_a_local_factor() {
+        assert_eq!(
+            amr_values(AuthMethod::Federated, MfaMethod::Provider),
+            vec!["mfa"]
+        );
+    }
+
+    #[test]
+    fn federated_login_without_mfa_does_not_claim_a_password() {
+        assert_eq!(
+            amr_values(AuthMethod::Federated, MfaMethod::Federated),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn local_password_login_claims_password() {
+        assert_eq!(
+            amr_values(AuthMethod::Password, MfaMethod::None),
+            vec!["pwd"]
+        );
+    }
+
+    #[test]
+    fn legacy_federated_password_session_does_not_claim_password() {
+        assert_eq!(
+            amr_values(AuthMethod::Unknown, MfaMethod::None),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn federated_password_local_totp_login_preserves_both_proofs() {
+        assert_eq!(
+            amr_values(AuthMethod::Password, MfaMethod::Totp),
+            vec!["pwd", "otp", "mfa"]
+        );
+    }
+
+    #[test]
+    fn federated_password_local_webauthn_login_preserves_both_proofs() {
+        assert_eq!(
+            amr_values(AuthMethod::Password, MfaMethod::WebAuthn),
+            vec!["pwd", "mfa"]
+        );
+    }
 
     #[test]
     fn test_at_hash() {

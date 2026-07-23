@@ -16,6 +16,7 @@ use crate::entity::kv::{KVAccess, KVNamespace, KVValue};
 use crate::entity::login_locations::LoginLocation;
 use crate::entity::logos::Logo;
 use crate::entity::magic_links::MagicLink;
+use crate::entity::one_time_password::OneTimePassword;
 use crate::entity::pam::authorized_keys::AuthorizedKey;
 use crate::entity::pam::groups::PamGroup;
 use crate::entity::pam::hosts::PamHost;
@@ -889,6 +890,56 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
     Ok(())
 }
 
+pub async fn one_time_password(data_before: Vec<OneTimePassword>) -> Result<(), ErrorResponse> {
+    let sql_1 = "DELETE FROM one_time_password";
+    let sql_2 = r#"
+INSERT INTO one_time_password
+(id, user_id, name, secret, enc_key_id, last_used, last_used_step, kind, is_active)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
+
+    if is_hiqlite() {
+        DB::hql().execute(sql_1, params!()).await?;
+        for b in data_before {
+            DB::hql()
+                .execute(
+                    sql_2,
+                    params!(
+                        b.id,
+                        b.user_id,
+                        b.name,
+                        b.secret,
+                        b.enc_key_id,
+                        b.last_used,
+                        b.last_used_step,
+                        b.kind.as_str(),
+                        b.is_active
+                    ),
+                )
+                .await?;
+        }
+    } else {
+        DB::pg_execute(sql_1, &[]).await?;
+        for b in data_before {
+            DB::pg_execute(
+                sql_2,
+                &[
+                    &b.id,
+                    &b.user_id,
+                    &b.name,
+                    &b.secret,
+                    &b.enc_key_id,
+                    &b.last_used,
+                    &b.last_used_step,
+                    &b.kind.as_str(),
+                    &b.is_active,
+                ],
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn pam_groups(data_before: Vec<PamGroup>) -> Result<(), ErrorResponse> {
     // To resolve FK issues, we will delete all pam tables here, since this will be the
     // first inserts that will be done.
@@ -1215,8 +1266,9 @@ pub async fn recent_passwords(
 pub async fn refresh_tokens(data_before: Vec<RefreshToken>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM refresh_tokens";
     let sql_2 = r#"
-INSERT INTO refresh_tokens (id, user_id, nbf, exp, scope, is_mfa, session_id, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
+INSERT INTO refresh_tokens
+(id, user_id, nbf, exp, scope, is_mfa, mfa_method, auth_method, session_id, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1231,6 +1283,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                         b.exp,
                         b.scope,
                         b.is_mfa,
+                        b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.session_id,
                         b.access_token_jti
                     ),
@@ -1249,6 +1303,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#;
                     &b.exp,
                     &b.scope,
                     &b.is_mfa,
+                    &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.session_id,
                     &b.access_token_jti,
                 ],
@@ -1265,8 +1321,8 @@ pub async fn refresh_tokens_devices(
     let sql_1 = "DELETE FROM refresh_tokens_devices";
     let sql_2 = r#"
 INSERT INTO refresh_tokens_devices
-(id, device_id, user_id, nbf, exp, scope, access_token_jti)
-VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
+(id, device_id, user_id, nbf, exp, scope, mfa_method, auth_method, access_token_jti)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1281,6 +1337,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                         b.nbf,
                         b.exp,
                         b.scope,
+                        b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.access_token_jti
                     ),
                 )
@@ -1298,6 +1356,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)"#;
                     &b.nbf,
                     &b.exp,
                     &b.scope,
+                    &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.access_token_jti,
                 ],
             )
@@ -1372,8 +1432,8 @@ pub async fn sessions(data_before: Vec<Session>) -> Result<(), ErrorResponse> {
     let sql_1 = "DELETE FROM sessions";
     let sql_2 = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, state, exp, last_seen)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, auth_method, state, exp, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#;
 
     if is_hiqlite() {
         DB::hql().execute(sql_1, params!()).await?;
@@ -1388,6 +1448,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                         b.roles,
                         b.groups,
                         b.is_mfa,
+                        b.mfa_method.as_str(),
+                        b.auth_method.as_str(),
                         b.state.as_str(),
                         b.exp,
                         b.last_seen
@@ -1407,6 +1469,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#;
                     &b.roles,
                     &b.groups,
                     &b.is_mfa,
+                    &b.mfa_method.as_str(),
+                    &b.auth_method.as_str(),
                     &b.state.as_str(),
                     &b.exp,
                     &b.last_seen,

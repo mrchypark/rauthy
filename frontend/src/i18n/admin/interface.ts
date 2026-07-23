@@ -440,10 +440,23 @@ export interface I18nAdmin {
         lastLogin: string;
         manualInitDesc: string;
         manualInit: string;
-        mfaDelete1: string;
-        // inserted as html
-        mfaDelete2: string;
-        noMfaKeys: string;
+        mfa: {
+            otp: {
+                title: string;
+                mfaDelete1: string;
+                mfaDelete2: string;
+                noMfaOtps: string;
+                resetTitle: string;
+                resetConfirm: string;
+                resetButton: string;
+            };
+            webauthn: {
+                title: string;
+                mfaDelete1: string;
+                mfaDelete2: string;
+                noMfaKeys: string;
+            };
+        };
         pkOnly1: string;
         pkOnly2: string;
         pkOnly3: string;

@@ -38,6 +38,103 @@ pub struct Session {
     pub exp: i64,
     pub last_seen: i64,
     pub remote_ip: Option<String>,
+    #[serde(default)]
+    #[column(parse)]
+    pub mfa_method: MfaMethod,
+    #[serde(default)]
+    #[column(parse)]
+    pub auth_method: AuthMethod,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMethod {
+    #[default]
+    Unknown,
+    Password,
+    Federated,
+    Passkey,
+}
+
+impl AuthMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Password => "password",
+            Self::Federated => "federated",
+            Self::Passkey => "passkey",
+        }
+    }
+}
+
+impl FromStr for AuthMethod {
+    type Err = ErrorResponse;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "password" => Ok(Self::Password),
+            "federated" => Ok(Self::Federated),
+            "passkey" => Ok(Self::Passkey),
+            _ => Err(ErrorResponse::new(
+                ErrorResponseType::Internal,
+                "invalid auth method",
+            )),
+        }
+    }
+}
+
+/// The MFA method actually verified for this session.
+///
+/// These values intentionally match the storage representation and the OIDC
+/// Authentication Method Reference vocabulary used during token issuance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MfaMethod {
+    #[default]
+    None,
+    /// Authentication delegated to an upstream provider without an MFA claim.
+    Federated,
+    WebAuthn,
+    Totp,
+    Provider,
+    /// A verified MFA ceremony from before method-level tracking existed.
+    Legacy,
+}
+
+impl MfaMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Federated => "federated",
+            Self::WebAuthn => "webauthn",
+            Self::Totp => "totp",
+            Self::Provider => "provider",
+            Self::Legacy => "mfa",
+        }
+    }
+
+    pub const fn is_mfa(self) -> bool {
+        !matches!(self, Self::None | Self::Federated)
+    }
+}
+
+impl FromStr for MfaMethod {
+    type Err = ErrorResponse;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "federated" => Ok(Self::Federated),
+            "webauthn" => Ok(Self::WebAuthn),
+            "totp" => Ok(Self::Totp),
+            "provider" => Ok(Self::Provider),
+            "mfa" => Ok(Self::Legacy),
+            _ => Err(ErrorResponse::new(
+                ErrorResponseType::Internal,
+                "invalid session MFA method",
+            )),
+        }
+    }
 }
 
 impl Debug for Session {
@@ -45,13 +142,14 @@ impl Debug for Session {
         write!(
             f,
             "Session {{ id: {}(...), csrf_token: {}(...), user_id: {:?}, roles: {:?}, groups: {:?}, \
-        is_mfa: {}, state: {}, exp: {}, last_seen: {}, remote_ip: {:?} }}",
+        is_mfa: {}, mfa_method: {}, state: {}, exp: {}, last_seen: {}, remote_ip: {:?} }}",
             &self.id[..5],
             &self.csrf_token[..5],
             self.user_id,
             self.roles,
             self.groups,
             self.is_mfa,
+            self.mfa_method.as_str(),
             self.state.as_str(),
             self.exp,
             self.last_seen,
@@ -159,8 +257,14 @@ impl Session {
     pub async fn find(id: String) -> Result<Self, ErrorResponse> {
         let client = DB::hql();
 
-        if let Some(slf) = client.get(Cache::Session, id.clone()).await? {
-            return Ok(slf);
+        match client.get(Cache::Session, id.clone()).await {
+            Ok(Some(slf)) => return Ok(slf),
+            Ok(None) => {}
+            Err(hiqlite::Error::Bincode(err)) => {
+                warn!(session_id = id, %err, "Evicting incompatible legacy Session cache entry");
+                client.delete(Cache::Session, id.clone()).await?;
+            }
+            Err(err) => return Err(err.into()),
         }
 
         let sql = "SELECT * FROM sessions WHERE id = $1";
@@ -366,11 +470,11 @@ OFFSET $3"#;
 
         let sql = r#"
 INSERT INTO
-sessions (id, csrf_token, user_id, roles, groups, is_mfa, state, exp, last_seen, remote_ip)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+sessions (id, csrf_token, user_id, roles, groups, is_mfa, mfa_method, auth_method, state, exp, last_seen, remote_ip)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT(id) DO UPDATE
-SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, last_seen = $9,
-    remote_ip = $10"#;
+SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, mfa_method = $7, auth_method = $8,
+    state = $9, exp = $10, last_seen = $11, remote_ip = $12"#;
 
         if is_hiqlite() {
             DB::hql()
@@ -383,6 +487,8 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, la
                         &self.roles,
                         &self.groups,
                         self.is_mfa,
+                        self.mfa_method.as_str(),
+                        self.auth_method.as_str(),
                         state_str,
                         self.exp,
                         self.last_seen,
@@ -400,6 +506,8 @@ SET user_id = $3, roles = $4, groups = $5, is_mfa = $6, state = $7, exp = $8, la
                     &self.roles,
                     &self.groups,
                     &self.is_mfa,
+                    &self.mfa_method.as_str(),
+                    &self.auth_method.as_str(),
                     &state_str,
                     &self.exp,
                     &self.last_seen,
@@ -480,6 +588,8 @@ impl Session {
             roles: None,
             groups: None,
             is_mfa: false, // cannot be known during creation
+            mfa_method: MfaMethod::None,
+            auth_method: AuthMethod::Unknown,
             state: SessionState::Init,
             exp: now
                 .add(chrono::Duration::seconds(exp_in as i64))
@@ -528,6 +638,8 @@ impl Session {
             roles,
             groups,
             is_mfa: false, // cannot be known during creation
+            mfa_method: MfaMethod::None,
+            auth_method: AuthMethod::Unknown,
             state: SessionState::Init,
             exp,
             last_seen: now.timestamp(),
@@ -652,6 +764,8 @@ impl Session {
                     "/auth/v1/providers/login",
                     "/auth/v1/providers/callback",
                     "/auth/v1/dev/providers_callback",
+                    "/auth/v1/users/otp_start",
+                    "/auth/v1/users/otp_finish",
                     "/auth/v1/users/webauthn_start",
                     "/auth/v1/users/webauthn_finish",
                     "/auth/v1/tos/accept",
@@ -665,6 +779,8 @@ impl Session {
                     "/auth/v1/oidc/token",
                     "/auth/v1/providers/login",
                     "/auth/v1/providers/callback",
+                    "/auth/v1/users/otp_start",
+                    "/auth/v1/users/otp_finish",
                     "/auth/v1/users/webauthn_start",
                     "/auth/v1/users/webauthn_finish",
                     "/auth/v1/tos/accept",
@@ -729,7 +845,27 @@ impl Session {
     #[inline]
     pub async fn set_mfa(&mut self, value: bool) -> Result<(), ErrorResponse> {
         self.is_mfa = value;
+        if !value {
+            self.mfa_method = MfaMethod::None;
+        } else if self.mfa_method == MfaMethod::None {
+            self.mfa_method = MfaMethod::Legacy;
+        }
         self.upsert().await
+    }
+
+    /// Marks a session authenticated only after the selected MFA ceremony succeeds.
+    pub async fn set_authenticated_with_mfa(
+        &mut self,
+        user: &User,
+        method: MfaMethod,
+    ) -> Result<(), ErrorResponse> {
+        debug_assert!(method.is_mfa());
+        if method == MfaMethod::WebAuthn && self.auth_method == AuthMethod::Unknown {
+            self.auth_method = AuthMethod::Passkey;
+        }
+        self.mfa_method = method;
+        self.is_mfa = method.is_mfa();
+        self.set_authenticated(user).await
     }
 
     #[inline(always)]
@@ -782,8 +918,10 @@ pub fn get_header_value<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::sessions::{Session, SessionState};
+    use crate::entity::sessions::{MfaMethod, Session, SessionState};
+    use rauthy_common::utils::{deserialize, serialize};
     use rauthy_error::ErrorResponse;
+    use serde::Serialize;
     use std::net::IpAddr;
     use std::str::FromStr;
 
@@ -811,5 +949,39 @@ mod tests {
         assert!(s.is_valid(600, Some(ip), "/"));
 
         Ok(())
+    }
+
+    #[test]
+    fn legacy_session_cache_payload_requires_targeted_eviction() {
+        #[derive(Debug, Serialize)]
+        struct LegacySession {
+            id: String,
+            csrf_token: String,
+            user_id: Option<String>,
+            roles: Option<String>,
+            groups: Option<String>,
+            is_mfa: bool,
+            state: SessionState,
+            exp: i64,
+            last_seen: i64,
+            remote_ip: Option<String>,
+        }
+
+        let legacy = LegacySession {
+            id: "session".into(),
+            csrf_token: "csrf".into(),
+            user_id: Some("user".into()),
+            roles: None,
+            groups: None,
+            is_mfa: true,
+            state: SessionState::Auth,
+            exp: 123,
+            last_seen: 100,
+            remote_ip: Some("127.0.0.1".into()),
+        };
+        let bytes = serialize(&legacy).unwrap();
+        let err = deserialize::<Session>(&bytes).unwrap_err();
+        assert!(err.message.contains("UnexpectedEnd"));
+        assert_eq!(MfaMethod::default(), MfaMethod::None);
     }
 }

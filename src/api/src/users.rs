@@ -24,16 +24,23 @@ use rauthy_data::entity::continuation_token::ContinuationToken;
 use rauthy_data::entity::devices::DeviceEntity;
 use rauthy_data::entity::email_rate_limit::EmailRateLimit;
 use rauthy_data::entity::groups::Group;
+use rauthy_data::entity::issued_tokens::IssuedToken;
 use rauthy_data::entity::login_locations::LoginLocation;
 use rauthy_data::entity::mfa_mod_token::MfaModToken;
+use rauthy_data::entity::one_time_password::{
+    self, OneTimePassword, OtpAdditionalData, OtpData, OtpKind, OtpServiceReq, TotpEnrollment,
+};
+use rauthy_data::entity::otp_verification::OtpVerificationAttempt;
 use rauthy_data::entity::password::PasswordPolicy;
 use rauthy_data::entity::pictures::{PICTURE_STORAGE_TYPE, PictureStorage, UserPicture};
 use rauthy_data::entity::pow::PowEntity;
 use rauthy_data::entity::refresh_tokens::RefreshToken;
+use rauthy_data::entity::refresh_tokens_devices::RefreshTokenDevice;
 use rauthy_data::entity::sessions::Session;
 use rauthy_data::entity::theme::ThemeCssFull;
 use rauthy_data::entity::tos::ToS;
 use rauthy_data::entity::tos_user_accept::ToSUserAccept;
+use rauthy_data::entity::totp_enrollment::PendingTotpEnrollment;
 use rauthy_data::entity::user_attr::{UserAttrConfigEntity, UserAttrValueEntity};
 use rauthy_data::entity::user_revoke::UserRevoke;
 use rauthy_data::entity::users::User;
@@ -51,6 +58,7 @@ use rauthy_data::rauthy_config::{RauthyConfig, UserValueConfigValue, VarsUserVal
 use rauthy_error::{ErrorResponse, ErrorResponseType};
 use rauthy_jwt::claims::{JwtCommonClaims, JwtTokenType};
 use rauthy_jwt::token::JwtToken;
+use rauthy_service::login_delay;
 use rauthy_service::oidc::helpers::get_bearer_token_from_header;
 use rauthy_service::oidc::logout;
 use rauthy_service::password_reset;
@@ -59,6 +67,7 @@ use spow::pow::Pow;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
 use tracing::{debug, error, info, warn};
 use validator::Validate;
@@ -742,7 +751,9 @@ pub async fn post_user_mfa_token(
     let user = User::find(user_id.to_string()).await?;
 
     if let Some(password) = payload.password {
-        if user.has_webauthn_enabled() {
+        if user.has_webauthn_enabled()
+            || (RauthyConfig::get().vars.otp.enable && user.has_otp_enabled().await?)
+        {
             return Err(ErrorResponse::new(
                 ErrorResponseType::BadRequest,
                 "must provide `mfa_code` instead of `password`",
@@ -756,20 +767,38 @@ pub async fn post_user_mfa_token(
             ));
         }
     } else if let Some(code) = payload.mfa_code {
-        if !user.has_webauthn_enabled() {
-            return Err(ErrorResponse::new(
-                ErrorResponseType::BadRequest,
-                "must provide `password`",
-            ));
+        // WebAuthn and OTP service codes live in separate cache namespaces. Resolve the
+        // presented proof itself instead of preferring whichever factor is enrolled first.
+        match WebauthnServiceReq::find(code.clone()).await {
+            Ok(svc_req) => {
+                if svc_req.user_id != user.id {
+                    return Err(ErrorResponse::new(
+                        ErrorResponseType::BadRequest,
+                        "mismatch in UserID",
+                    ));
+                }
+                svc_req.delete().await?;
+            }
+            Err(err) if err.error != ErrorResponseType::NotFound => return Err(err),
+            Err(_) => match OtpServiceReq::find(code).await {
+                Ok(svc_req) => {
+                    if svc_req.user_id != user.id {
+                        return Err(ErrorResponse::new(
+                            ErrorResponseType::BadRequest,
+                            "mismatch in UserID",
+                        ));
+                    }
+                    svc_req.delete().await?;
+                }
+                Err(err) if err.error != ErrorResponseType::NotFound => return Err(err),
+                Err(_) => {
+                    return Err(ErrorResponse::new(
+                        ErrorResponseType::BadRequest,
+                        "invalid or expired `mfa_code`",
+                    ));
+                }
+            },
         }
-        let svc_req = WebauthnServiceReq::find(code).await?;
-        if svc_req.user_id != user.id {
-            return Err(ErrorResponse::new(
-                ErrorResponseType::BadRequest,
-                "mismatch in UserID",
-            ));
-        }
-        svc_req.delete().await?;
     } else {
         return Err(ErrorResponse::new(
             ErrorResponseType::BadRequest,
@@ -1295,6 +1324,658 @@ async fn user_revoke_handle(
         .await?;
 
     Ok(())
+}
+
+/// Get status of all registered OTP of a user
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+/// - authenticated and logged in admin
+#[utoipa::path(
+    get,
+    path = "/users/{id}/otp",
+    tag = "users",
+    responses(
+        (status = 200, description = "Ok", body = [OtpGetResponse]),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[get("/users/{id}/otp")]
+pub async fn get_user_otps(
+    id: web::Path<String>,
+    principal: ReqPrincipal,
+) -> Result<HttpResponse, ErrorResponse> {
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to get OTPs but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "feature disabled",
+        ));
+    }
+
+    let user_id = id.into_inner();
+    principal.validate_user_or_admin(&user_id)?;
+
+    let resp = OneTimePassword::find_for_user(&user_id)
+        .await?
+        .into_iter()
+        .map(OtpGetResponse::from)
+        .collect::<Vec<OtpGetResponse>>();
+
+    Ok(HttpResponse::Ok().json(resp))
+}
+
+/// Create a new OTP
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    post,
+    path = "/users/{id}/otp",
+    tag = "users",
+    request_body = OtpCreateRequest,
+    responses(
+        (status = 201, description = "Created", body = OtpCreateResponse),
+        (status = 400, description = "BadRequest", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    )
+)]
+#[post("/users/{id}/otp")]
+pub async fn create_user_otp(
+    id: web::Path<String>,
+    principal: ReqPrincipal,
+    req: HttpRequest,
+    Json(payload): Json<OtpCreateRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to create an OTP but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "feature disabled",
+        ));
+    }
+    payload.validate()?;
+
+    let user_id: String = id.into_inner();
+    let otp_kind = match payload.otp_kind {
+        OtpKindRequest::Email if RauthyConfig::get().vars.otp.email.enable => OtpKind::Email,
+        OtpKindRequest::Time if RauthyConfig::get().vars.otp.time.enable => OtpKind::Time,
+        _ => {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::Forbidden,
+                "OTP kind is disabled",
+            ));
+        }
+    };
+    principal.validate_user_session(&user_id)?;
+
+    let token = MfaModToken::find(&payload.mfa_mod_token_id).await?;
+    let ip = real_ip_from_req(&req)?;
+    token.validate(principal.user_id()?, ip)?;
+
+    // this prevents multiple OTPs of the same kind
+    // should we allow multiple time-based otp?
+    if let Ok(otp) = OneTimePassword::find_kind_for_user(&otp_kind, &user_id).await
+        && otp.is_active
+    {
+        return Err(ErrorResponse::new(
+            ErrorResponseType::BadRequest,
+            "otp already exist",
+        ));
+    }
+
+    if otp_kind == OtpKind::Time {
+        let user = User::find(user_id.clone()).await?;
+        let enrollment = TotpEnrollment::generate("Rauthy".to_string(), user.email)?;
+        let pending = PendingTotpEnrollment::new(
+            user_id,
+            payload.otp_name.clone(),
+            payload.mfa_mod_token_id,
+            ip,
+            enrollment.secret(),
+        )?;
+        pending.save().await?;
+        let response = OtpCreateResponse {
+            otp: OtpGetResponse {
+                id: pending.id.clone(),
+                name: payload.otp_name,
+                last_used: 0,
+                kind: OtpKind::Time.to_string(),
+                is_active: false,
+            },
+            enrollment: Some(TotpEnrollmentResponse {
+                enrollment_id: pending.id,
+                secret_base32: enrollment.manual_secret,
+                otpauth_uri: enrollment.otpauth_uri,
+                qr_code_base64: enrollment.qr_base64,
+                expires_at: pending.expires_at,
+            }),
+        };
+        return Ok(HttpResponse::Created().json(response));
+    }
+
+    let mut otp = if let Ok(otp) = OneTimePassword::find_kind_for_user(&otp_kind, &user_id).await {
+        if otp.is_active {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "otp already exist",
+            ));
+        }
+        otp
+    } else {
+        OneTimePassword::create(user_id, payload.otp_name, otp_kind).await?
+    };
+    otp.request_otp().await?;
+    let resp: OtpGetResponse = otp.into();
+    Ok(HttpResponse::Created().json(OtpCreateResponse {
+        otp: resp,
+        enrollment: None,
+    }))
+}
+
+/// Activate an OTP
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    put,
+    path = "/users/{id}/otp",
+    tag = "users",
+    request_body = OtpActivateRequest,
+    responses(
+        (status = 200, description = "Ok"),
+        (status = 400, description = "BadRequest", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "NotFound", body = ErrorResponse),
+    )
+)]
+#[put("/users/{id}/otp")]
+pub async fn activate_user_otp(
+    id: web::Path<String>,
+    principal: ReqPrincipal,
+    req: HttpRequest,
+    Json(payload): Json<OtpActivateRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to activate an OTP but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "feature disabled",
+        ));
+    }
+    payload.validate()?;
+
+    let user_id: String = id.into_inner();
+    principal.validate_user_session(&user_id)?;
+
+    let token = MfaModToken::find(&payload.mfa_mod_token_id).await?;
+    let ip = real_ip_from_req(&req)?;
+    token.validate(principal.user_id()?, ip)?;
+
+    if let Ok(pending) = PendingTotpEnrollment::find(&payload.otp_id).await {
+        if !RauthyConfig::get().vars.otp.time.enable {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::Forbidden,
+                "TOTP is disabled",
+            ));
+        }
+        pending.validate_binding(
+            &user_id,
+            &payload.mfa_mod_token_id,
+            ip,
+            Utc::now().timestamp(),
+        )?;
+        pending.ensure_attempts_available().await?;
+        let secret = pending.secret()?;
+        let matched_step = match OneTimePassword::match_totp_step(
+            secret.as_slice(),
+            &payload.otp_code,
+            Utc::now().timestamp() as u64,
+        ) {
+            Ok(step) => step,
+            Err(err) if err.error == ErrorResponseType::BadRequest => None,
+            Err(err) => return Err(err),
+        };
+        let Some(matched_step) = matched_step else {
+            let attempt_result = pending.record_failure().await;
+            Event::otp_verify_failed(&user_id, "time", ip)
+                .send()
+                .await?;
+            attempt_result?;
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "code is incorrect",
+            ));
+        };
+        if let Err(err) = pending.claim_once().await {
+            Event::otp_replay_rejected(&user_id, "time", ip)
+                .send()
+                .await?;
+            return Err(err);
+        }
+        OneTimePassword::create_totp(
+            user_id.clone(),
+            pending.name.clone(),
+            secret.as_slice(),
+            matched_step,
+        )
+        .await?;
+        pending.delete().await?;
+        Event::otp_enrollment(&user_id, "time", ip).send().await?;
+        return Ok(HttpResponse::Ok().finish());
+    }
+
+    if let Ok(mut otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
+        if otp.kind == OtpKind::Email && !RauthyConfig::get().vars.otp.email.enable {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::Forbidden,
+                "e-mail OTP is disabled",
+            ));
+        }
+        otp.validate(&user_id, &payload.otp_code).await?;
+        otp.activate().await?;
+        Event::otp_enrollment(&user_id, otp.kind.as_str(), ip)
+            .send()
+            .await?;
+        return Ok(HttpResponse::Ok().finish());
+    }
+    Err(ErrorResponse::new(
+        ErrorResponseType::NotFound,
+        "otp does not exist",
+    ))
+}
+
+/// Delete an OTP
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+/// - authenticated and logged in admin
+#[utoipa::path(
+    delete,
+    path = "/users/{id}/otp",
+    tag = "users",
+    request_body = OtpDeleteRequest,
+    responses(
+        (status = 200, description = "Ok"),
+        (status = 400, description = "BadRequest", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    )
+)]
+#[delete("/users/{id}/otp")]
+pub async fn delete_user_otp(
+    id: web::Path<String>,
+    principal: ReqPrincipal,
+    req: HttpRequest,
+    Json(payload): Json<OtpDeleteRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to delete an OTP but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "Feature disabled",
+        ));
+    }
+    payload.validate()?;
+
+    let user_id: String = id.into_inner();
+    let is_admin_reset =
+        principal.validate_admin_session().is_ok() && principal.is_user(&user_id).is_err();
+    let ip = real_ip_from_req(&req)?;
+
+    if !is_admin_reset {
+        principal.validate_session_auth()?;
+        principal.is_user(&user_id)?;
+
+        let Some(token_id) = payload.mfa_mod_token_id else {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "missing `mfa_mod_token_id`",
+            ));
+        };
+        let token = MfaModToken::find(&token_id).await?;
+        token.validate(principal.user_id()?, ip)?;
+
+        warn!(
+            "Otp delete request from user {} for otp {}",
+            user_id, payload.otp_id
+        );
+    } else {
+        warn!(
+            "Otp delete request from admin for user {} for otp {}",
+            user_id, payload.otp_id
+        );
+    }
+
+    if let Ok(otp) = OneTimePassword::find_by_id_for_user(&payload.otp_id, &user_id).await {
+        Session::invalidate_for_user(&user_id).await?;
+        RefreshToken::invalidate_for_user(&user_id).await?;
+        RefreshTokenDevice::invalidate_all_for_user(&user_id).await?;
+        IssuedToken::revoke_for_user(&user_id, true).await?;
+        logout::execute_backchannel_logout(None, Some(user_id.clone())).await?;
+        OneTimePassword::delete(&otp.id).await?;
+        if is_admin_reset {
+            Event::otp_admin_reset(
+                &user_id,
+                otp.kind.as_str(),
+                ip,
+                principal.user_id().unwrap_or("admin"),
+            )
+            .send()
+            .await?;
+        } else {
+            Event::otp_deletion(&user_id, otp.kind.as_str(), ip)
+                .send()
+                .await?;
+        }
+        // make sure to delete any existing MFA cookie when a key is deleted
+        let cookie = ApiCookie::build(COOKIE_MFA, "", 0);
+        let mut resp = HttpResponse::Ok().finish();
+        if let Err(err) = resp.add_cookie(&cookie) {
+            error!("Error deleting MFA cookie in delete_user_otp: {}", err);
+        }
+        return Ok(resp);
+    }
+
+    Err(ErrorResponse::new(
+        ErrorResponseType::NotFound,
+        "otp does not exist",
+    ))
+}
+
+async fn finish_otp_with_controls(
+    req: &HttpRequest,
+    browser_id: BrowserId,
+    session: Option<Session>,
+    payload: OtpAuthFinishRequest,
+    ip: IpAddr,
+) -> Result<HttpResponse, ErrorResponse> {
+    if let Some(consumed) = OtpVerificationAttempt::consumed(&payload.code).await? {
+        Event::otp_replay_rejected(&consumed.user_id, &consumed.kind, ip)
+            .send()
+            .await?;
+        return Err(ErrorResponse::new(
+            ErrorResponseType::BadRequest,
+            "OTP challenge was already consumed",
+        ));
+    }
+
+    let auth_data = match OtpData::find(payload.code.clone()).await {
+        Ok(data) => data,
+        Err(err) => {
+            OtpVerificationAttempt::cleanup_unknown(&payload.code, ip).await?;
+            return Err(err);
+        }
+    };
+    let user_id = match &auth_data.data {
+        OtpAdditionalData::Login(data) => data.user_id.clone(),
+        OtpAdditionalData::Service(data) => data.user_id.clone(),
+        OtpAdditionalData::Test(user_id) => user_id.clone(),
+        OtpAdditionalData::LoginToSAwait(_) => {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "invalid OTP challenge state",
+            ));
+        }
+    };
+    let otp = OneTimePassword::find(&auth_data.otp_id).await?;
+    let kind = otp.kind.as_str();
+    OtpVerificationAttempt::ensure_identity_available(&user_id, ip).await?;
+    OtpVerificationAttempt::ensure_challenge_available(&payload.code).await?;
+    let ttl = RauthyConfig::get().vars.otp.exp as i64 * 60;
+    if let Err(err) = OtpVerificationAttempt::claim(&user_id, ip, &payload.code, ttl).await {
+        Event::otp_replay_rejected(&user_id, kind, ip)
+            .send()
+            .await?;
+        return Err(err);
+    }
+
+    let challenge = payload.code.clone();
+    match one_time_password::auth_finish(req, browser_id, session, payload).await {
+        Ok(data) => {
+            OtpVerificationAttempt::success(&user_id, ip, &challenge, kind, ttl).await?;
+            Ok(data.into_response())
+        }
+        Err(err) => {
+            // A missing challenge means OTP proof succeeded and a later operation failed.
+            // Never count that as another verification failure.
+            if OtpData::find(challenge.clone()).await.is_err() {
+                OtpVerificationAttempt::success(&user_id, ip, &challenge, kind, ttl).await?;
+                return Err(err);
+            }
+
+            let is_replay = err.message.contains("already used");
+            let limit = OtpVerificationAttempt::record_failure(&user_id, ip, &challenge).await;
+            if is_replay {
+                Event::otp_replay_rejected(&user_id, kind, ip)
+                    .send()
+                    .await?;
+            } else {
+                Event::otp_verify_failed(&user_id, kind, ip).send().await?;
+            }
+            match limit {
+                Ok(()) => {
+                    OtpVerificationAttempt::release(&challenge).await?;
+                    Err(err)
+                }
+                Err(limit_err) => {
+                    auth_data.delete().await?;
+                    OtpVerificationAttempt::terminate(&user_id, ip, &challenge, kind, ttl).await?;
+                    Err(limit_err)
+                }
+            }
+        }
+    }
+}
+
+/// Starts the authentication process with otp for this user
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    post,
+    path = "/users/{id}/otp/auth/start",
+    tag = "mfa",
+    request_body = OtpAuthStartRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAuthStartResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    )
+)]
+#[post("/users/{id}/otp/auth/start")]
+pub async fn post_otp_auth_start(
+    id: web::Path<String>,
+    // The principal here must be optional to make cases like user password reset in a
+    // fully new / different browser which does not have any lefter data or cookies
+    principal: ReqPrincipal,
+    req: HttpRequest,
+    Json(payload): Json<OtpAuthStartRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to auth with an OTP but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "Feature disabled",
+        ));
+    }
+    payload.validate()?;
+
+    let id = match payload.purpose {
+        // only for a Login purpose, this can be accessed without authentication (yet)
+        MfaPurpose::Login(_) => {
+            // During Login, the session is allowed to be in init only state
+            principal.validate_session_auth_or_init()?;
+            id.into_inner()
+        }
+
+        MfaPurpose::PasswordReset => {
+            // A password reset otp req can be opened without any session at all.
+            // This is mandatory to make password reset flows fully work, even with an old
+            // account with linked Otps.
+            match ApiCookie::from_req(&req, PWD_RESET_COOKIE) {
+                None => {
+                    return Err(ErrorResponse::new(
+                        ErrorResponseType::BadRequest,
+                        "You are not allowed to do this operation without an active binding cookie",
+                    ));
+                }
+                Some(c) => {
+                    if c.len() != 48 {
+                        return Err(ErrorResponse::new(
+                            ErrorResponseType::BadRequest,
+                            "Malformed magic link binding cookie",
+                        ));
+                    };
+                }
+            };
+
+            id.into_inner()
+        }
+        _ => {
+            // for all other purposes, we need an authenticated session
+            principal.validate_session_auth()?;
+
+            // make sure the principal is this very user
+            let id = id.into_inner();
+            principal.is_user(&id)?;
+            id
+        }
+    };
+
+    OtpVerificationAttempt::ensure_identity_available(&id, real_ip_from_req(&req)?).await?;
+    one_time_password::auth_start(Some(id), &payload)
+        .await
+        .map(|res| HttpResponse::Ok().json(res))
+}
+
+/// Finishes the authentication process with otp for this user
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    post,
+    path = "/users/{id}/otp/auth/finish",
+    tag = "mfa",
+    request_body = OtpAuthFinishRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAdditionalData),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[post("/users/{id}/otp/auth/finish")]
+pub async fn post_otp_auth_finish(
+    _id: web::Path<String>,
+    req: HttpRequest,
+    browser_id: BrowserId,
+    principal: ReqPrincipal,
+    Json(payload): Json<OtpAuthFinishRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let ip = real_ip_from_req(&req)?;
+    if !&RauthyConfig::get().vars.otp.enable {
+        warn!("Request to auth with an OTP but `otp.enable` is set to `false`");
+        return Err(ErrorResponse::new(
+            ErrorResponseType::Forbidden,
+            "Feature disabled",
+        ));
+    }
+    payload.validate()?;
+
+    // We do not need to further validate the principal here.
+    // All of this is done at the /start endpoint.
+    // This here will simply fail, if the secret code from the /start does not exist
+    // -> indirect validation through existing code.
+
+    let principal = principal.into_inner();
+    let res = finish_otp_with_controls(&req, browser_id, principal.session, payload, ip).await;
+    login_delay::handle_login_delay(ip, start, res, false).await
+}
+
+/// Starts the authentication process using OTP for this user. This only works during
+/// the login. Service requests need to use the user-specific endpoint.
+#[utoipa::path(
+    post,
+    path = "/users/otp_start",
+    tag = "mfa",
+    request_body = OtpAuthStartRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAuthStartResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[post("/users/otp_start")]
+pub async fn post_otp_auth_start_login(
+    principal: ReqPrincipal,
+    Json(payload): Json<OtpAuthStartRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    payload.validate()?;
+    let id = match payload.purpose {
+        MfaPurpose::Login(_) => {
+            // During Login, the session is allowed to be in init-only state. Realistically, the
+            // session middleware will not accept an init-session on this path, only authenticated
+            // ones, but we keep the logic here correct.
+            principal.validate_session_auth_or_init()?;
+            // The user.id might not exist in the session yet at this point. However, it's stored
+            // inside the Otp login data. The `start_start()` will take care of it.
+            None
+        }
+        MfaPurpose::PasswordReset => {
+            return Err(ErrorResponse::new(
+                ErrorResponseType::BadRequest,
+                "Password requests must use the user-specific otp start endpoint",
+            ));
+        }
+        _ => {
+            // for all other purposes, we need an authenticated session
+            principal.validate_session_auth()?;
+            Some(principal.user_id()?.to_string())
+        }
+    };
+    one_time_password::auth_start(id, &payload)
+        .await
+        .map(|res| HttpResponse::Ok().json(res))
+}
+
+/// Finishes the authentication process using OTP for this user.
+///
+/// **Permissions**
+/// - authenticated and logged in user for this very {id}
+#[utoipa::path(
+    post,
+    path = "/users/otp_finish",
+    tag = "mfa",
+    request_body = OtpAuthFinishRequest,
+    responses(
+        (status = 200, description = "Ok", body = OtpAdditionalData),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+    ),
+)]
+#[post("/users/otp_finish")]
+pub async fn post_otp_auth_finish_login(
+    req: HttpRequest,
+    browser_id: BrowserId,
+    principal: ReqPrincipal,
+    Json(payload): Json<OtpAuthFinishRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let ip = real_ip_from_req(&req)?;
+    payload.validate()?;
+
+    // We do not need to further validate the principal here.
+    // All of this is done at the /start endpoint.
+    // This here will simply fail, if the secret code from the /start does not exist
+    // -> indirect validation through existing code.
+
+    let principal = principal.into_inner();
+    let res = finish_otp_with_controls(&req, browser_id, principal.session, payload, ip).await;
+    login_delay::handle_login_delay(ip, start, res, false).await
 }
 
 /// Get all registered Webauthn Passkeys for a user

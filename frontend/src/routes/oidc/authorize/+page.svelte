@@ -25,12 +25,16 @@
     import ThemeSwitch from '$lib5/ThemeSwitch.svelte';
     import type { AuthProviderTemplate } from '$api/templates/AuthProvider.ts';
     import InputPassword from '$lib5/form/InputPassword.svelte';
-    import type { MfaPurpose, WebauthnAdditionalData } from '$webauthn/types.ts';
+    import type { WebauthnAdditionalData } from '$mfa/webauthn/types.ts';
     import { fetchGet, fetchPost, type IResponse } from '$api/fetch';
     import type {
+        ActiveOtp,
         CodeChallengeMethod,
         LoginRefreshRequest,
         LoginRequest,
+        MfaChoiceResponse,
+        MfaLoginMethod,
+        OtpLoginResponse,
         RequestResetRequest,
         WebauthnLoginResponse,
     } from '$api/types/authorize.ts';
@@ -47,6 +51,10 @@
     import { execProviderLogin } from '$utils/login';
     import Modal from '$lib/Modal.svelte';
     import Loading from '$lib/Loading.svelte';
+    import OtpRequest from '$lib5/OtpRequest.svelte';
+    import type { MfaPurpose } from '$api/types/mfa';
+    import type { OtpAdditionalData } from '$mfa/otp/types';
+    import type { OtpKind } from '$api/types/otp';
 
     const inputWidth = '18rem';
 
@@ -79,6 +87,10 @@
     let existingMfaUser: undefined | string = $state();
     let providers: AuthProviderTemplate[] = $state([]);
     let mfaPurpose: undefined | MfaPurpose = $state();
+    let mfaKind: undefined | 'webauthn' | 'otp' = $state();
+    let activeOtps: undefined | ActiveOtp[] = $state();
+    let selectedLoginOtpKind: undefined | OtpKind = $state();
+    let mfaChoices: undefined | MfaLoginMethod[] = $state();
 
     let isLoading = $state(false);
     let isAutoRefreshing = $state(false);
@@ -249,14 +261,18 @@
             payload.code_challenge_method = challengeMethod;
         }
 
-        let res = await fetchPost<undefined | WebauthnLoginResponse>(
+        let res = await fetchPost<undefined | WebauthnLoginResponse | OtpLoginResponse>(
             '/auth/v1/oidc/authorize/refresh',
             payload,
         );
         await handleAuthRes(res);
     }
 
-    async function onSubmit(form?: HTMLFormElement, params?: URLSearchParams) {
+    async function onSubmit(
+        form?: HTMLFormElement,
+        params?: URLSearchParams,
+        selectedMfa?: MfaLoginMethod,
+    ) {
         if (isAtproto) {
             return providerLogin(atprotoId);
         }
@@ -273,6 +289,10 @@
         }
 
         isLoading = true;
+
+        if (selectedMfa) {
+            selectedLoginOtpKind = selectedMfa === 'totp' ? 'time' : undefined;
+        }
 
         let pow = (await fetchSolvePow()) || '';
 
@@ -316,17 +336,30 @@
             url = '/auth/v1/dev/authorize';
         }
 
-        let res = await fetchPost<undefined | WebauthnLoginResponse | ToSAwaitLoginResponse>(
+        let res = await fetchPost<
+            | undefined
+            | WebauthnLoginResponse
+            | ToSAwaitLoginResponse
+            | OtpLoginResponse
+            | MfaChoiceResponse
+        >(
             url,
             payload,
             'json',
             'noRedirect',
+            selectedMfa ? { 'x-rauthy-mfa-method': selectedMfa } : undefined,
         );
         await handleAuthRes(res);
     }
 
     async function handleAuthRes(
-        res?: IResponse<undefined | WebauthnLoginResponse | ToSAwaitLoginResponse>,
+        res?: IResponse<
+            | undefined
+            | WebauthnLoginResponse
+            | ToSAwaitLoginResponse
+            | OtpLoginResponse
+            | MfaChoiceResponse
+        >,
     ) {
         isLoading = false;
         isAutoRefreshing = false;
@@ -345,13 +378,25 @@
             }
             window.location.replace(loc);
         } else if (res.status === 200) {
-            // -> all good, but needs additional passkey validation
+            // -> all good, but needs additional MFA validation
             err = '';
             let body = res.body;
-            if (body && 'code' in body) {
+            if (body && 'methods' in body) {
+                mfaChoices = body.methods;
+            } else if (body && 'code' in body) {
+                mfaChoices = undefined;
+                password = '';
                 mfaPurpose = { Login: body.code as string };
+                if ('active_otps' in body) {
+                    activeOtps = body.active_otps;
+                    mfaKind = 'otp';
+                } else {
+                    mfaKind = 'webauthn';
+                }
             } else {
-                console.error('did not receive a proper WebauthnLoginResponse after HTTP200');
+                console.error(
+                    'did not receive a proper OtpLoginResponse or WebauthnLoginResponse after HTTP200',
+                );
             }
         } else if (res.status === 205) {
             // -> all good, password only account, user needs to update some values
@@ -469,19 +514,22 @@
         tosAcceptCode = '';
         tos = undefined;
         isLoading = false;
+        mfaKind = undefined;
         mfaPurpose = undefined;
     }
 
-    function onWebauthnError(error: string) {
+    function onMfaError(error: string) {
         // If there is any error with the key, the user should start a new login process
         mfaPurpose = undefined;
+        mfaKind = undefined;
         err = error;
     }
 
-    function onWebauthnSuccess(data?: WebauthnAdditionalData) {
+    function onMfaSuccess(data?: WebauthnAdditionalData | OtpAdditionalData) {
         if (!data) {
             // will be empty if the user needs to update values
             mfaPurpose = undefined;
+            mfaKind = undefined;
             showModalUpdate = true;
             return;
         }
@@ -492,6 +540,7 @@
             // login successful, but the user needs to accept updated ToS
             tosAcceptCode = data.tos_await_code as string;
             mfaPurpose = undefined;
+            mfaKind = undefined;
             fetchTos();
         }
     }
@@ -568,14 +617,47 @@
                     to output proper logs in case of misconfiguration.
                     Another approach would be to check this in the backend and emit warning logs.
                     -->
-                    <WebauthnRequest
-                        purpose={mfaPurpose}
-                        onSuccess={onWebauthnSuccess}
-                        onError={onWebauthnError}
-                    />
+                    {#if mfaKind == 'webauthn'}
+                        <WebauthnRequest
+                            purpose={mfaPurpose}
+                            onSuccess={onMfaSuccess}
+                            onError={onMfaError}
+                        />
+                    {:else if mfaKind == 'otp' && activeOtps}
+                        <OtpRequest
+                            {activeOtps}
+                            selectedOtpKind={selectedLoginOtpKind}
+                            purpose={mfaPurpose}
+                            onSuccess={onMfaSuccess}
+                            onError={onMfaError}
+                        />
+                    {/if}
+                {:else if mfaChoices}
+                    <div class="mfaChoice" role="group" aria-label={t.authorize.chooseMfa}>
+                        <b>{t.authorize.chooseMfa}</b>
+                        {#if mfaChoices.includes('webauthn')}
+                            <Button
+                                ariaLabel={t.mfa.webauthn.title}
+                                {isLoading}
+                                onclick={() => onSubmit(undefined, undefined, 'webauthn')}
+                            >
+                                {t.mfa.webauthn.title}
+                            </Button>
+                        {/if}
+                        {#if mfaChoices.includes('totp')}
+                            <Button
+                                ariaLabel={t.mfa.otp.titleTime}
+                                level={2}
+                                {isLoading}
+                                onclick={() => onSubmit(undefined, undefined, 'totp')}
+                            >
+                                {t.mfa.otp.titleTime}
+                            </Button>
+                        {/if}
+                    </div>
                 {/if}
 
-                {#if !clientMfaForce}
+                {#if !clientMfaForce && !mfaChoices}
                     <Form action={authorizeUrl} {onSubmit}>
                         <div class:emailMinHeight={!showPasswordInput}>
                             {#if isAtproto}
@@ -755,6 +837,14 @@
 </Main>
 
 <style>
+    .mfaChoice {
+        width: min(90dvw, 18rem);
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin: 1rem 0;
+    }
+
     .loadingGlobal {
         width: 100dvw;
         height: 100dvh;
