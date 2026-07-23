@@ -297,6 +297,7 @@ async fn test_clients() -> Result<(), Box<dyn Error>> {
 async fn test_client_favicon_is_independent_from_logo() -> Result<(), Box<dyn Error>> {
     const LOGO: &[u8] = include_bytes!("../../../assets/logo/rauthy_dark_small.png");
     const FAVICON: &[u8] = include_bytes!("../../../assets/logo/rauthy_light_small.png");
+    const FAVICON_SVG: &[u8] = include_bytes!("../../../assets/logo/rauthy_light.svg");
 
     let auth_headers = get_auth_headers().await?;
     let backend_url = get_backend_url();
@@ -416,6 +417,18 @@ async fn test_client_favicon_is_independent_from_logo() -> Result<(), Box<dyn Er
     let res = client.get(&favicon_url).send().await?;
     assert_eq!(res.status(), 200);
     assert_eq!(res.bytes().await?, favicon);
+
+    let res = client
+        .put(&favicon_url)
+        .headers(auth_headers.clone())
+        .multipart(image_form(FAVICON_SVG, "favicon.svg"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), 200);
+
+    let res = client.get(&logo_url).send().await?;
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.bytes().await?, logo);
 
     let res = client
         .delete(&favicon_url)

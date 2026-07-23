@@ -94,6 +94,15 @@
         logoKey = genKey();
     }
 
+    async function onLogoDelete() {
+        let res = await fetchDelete(`/auth/v1/clients/${client.id}/logo`);
+        if (res.error) {
+            err = res.error.message;
+        } else {
+            logoKey = genKey();
+        }
+    }
+
     async function onFaviconDelete() {
         let res = await fetchDelete(`/auth/v1/clients/${client.id}/favicon`);
         if (res.error) {
@@ -141,12 +150,18 @@
                 <hr />
 
                 <p>Logo Upload</p>
-                <InputFile
-                    method="PUT"
-                    url={`/auth/v1/clients/${client.id}/logo`}
-                    fileName="logo"
-                    onSuccess={onUploadSuccess}
-                />
+                <div class="logo">
+                    <InputFile
+                        method="PUT"
+                        url={`/auth/v1/clients/${client.id}/logo`}
+                        fileName="logo"
+                        width="100%"
+                        onSuccess={onUploadSuccess}
+                    />
+                    <Button ariaLabel={t.common.delete} invisible onclick={onLogoDelete}>
+                        <IconTrash width="1.25rem" />
+                    </Button>
+                </div>
 
                 <p>{ta.clients.branding.faviconUpload}</p>
                 <div class="favicon">
@@ -163,7 +178,7 @@
                         method="PUT"
                         url={`/auth/v1/clients/${client.id}/favicon`}
                         fileName="favicon"
-                        width="13rem"
+                        width="100%"
                         onSuccess={onFaviconUploadSuccess}
                     />
                     <Button ariaLabel={t.common.delete} invisible onclick={onFaviconDelete}>
@@ -202,10 +217,16 @@
         gap: 0.5rem;
     }
 
+    .logo,
     .favicon {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
         gap: 0.5rem;
+    }
+
+    .favicon {
+        grid-template-columns: 2rem minmax(0, 1fr) auto;
     }
 
     .favicon img {

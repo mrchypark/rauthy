@@ -531,7 +531,7 @@
 <Template id={TPL_ATPROTO_ID} bind:value={atprotoId} />
 <Template id={TPL_CLIENT_NAME} bind:value={clientName} />
 <Template id={TPL_CLIENT_URL} bind:value={clientUri} />
-<Template id={TPL_CLIENT_FAVICON_UPDATED} bind:value={clientFaviconUpdated} />
+<Template id={TPL_CLIENT_FAVICON_UPDATED} {clientId} bind:value={clientFaviconUpdated} />
 <Template id={TPL_CLIENT_LOGO_UPDATED} bind:value={clientLogoUpdated} />
 <Template id={TPL_CSRF_TOKEN} bind:value={csrfToken} />
 <Template id={TPL_LOGIN_ACTION} bind:value={loginAction} />

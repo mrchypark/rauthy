@@ -371,7 +371,7 @@ fn client_image_response(logo: Logo, updated: Option<i64>) -> HttpResponse {
     }
 }
 
-async fn multipart_image(
+async fn extract_multipart_data(
     mut payload: actix_multipart::Multipart,
 ) -> Result<(Vec<u8>, actix_web::mime::Mime), ErrorResponse> {
     // we only accept a single field from the Multipart upload -> no looping here
@@ -387,13 +387,13 @@ async fn multipart_image(
     })?;
     debug!("content_type: {:?}", content_type);
 
-    let mut buf = Vec::with_capacity(128 * 1024);
+    let mut data = Vec::with_capacity(128 * 1024);
     while let Some(chunk) = field.next().await {
         let bytes = chunk?;
-        buf.extend(bytes);
+        data.extend(bytes);
     }
 
-    Ok((buf, content_type))
+    Ok((data, content_type))
 }
 
 /// Upload a custom logo for the login page for this client
@@ -421,8 +421,8 @@ pub async fn put_client_logo(
     principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Update)?;
     content_len_limit(&req, 10)?;
 
-    let (buf, content_type) = multipart_image(payload).await?;
-    Logo::upsert(id.into_inner(), buf, content_type, LogoType::Client).await?;
+    let (data, content_type) = extract_multipart_data(payload).await?;
+    Logo::upsert(id.into_inner(), data, content_type, LogoType::Client).await?;
 
     Ok(HttpResponse::Ok()
         .insert_header(("Clear-Site-Data", "cache"))
@@ -448,7 +448,7 @@ pub async fn delete_client_logo(
     id: web::Path<String>,
     principal: ReqPrincipal,
 ) -> Result<HttpResponse, ErrorResponse> {
-    principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Delete)?;
+    principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Update)?;
 
     Logo::delete_client_logo(id.as_str()).await?;
 
@@ -505,10 +505,10 @@ pub async fn put_client_favicon(
     principal.validate_api_key_or_admin_session(AccessGroup::Clients, AccessRights::Update)?;
     content_len_limit(&req, 10)?;
 
-    let (buf, content_type) = multipart_image(payload).await?;
+    let (data, content_type) = extract_multipart_data(payload).await?;
     Logo::upsert_with_res(
         id.into_inner(),
-        buf,
+        data,
         content_type,
         LogoType::Client,
         LogoRes::Favicon,

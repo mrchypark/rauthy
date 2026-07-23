@@ -207,7 +207,7 @@ impl Logo {
                 "image/jpeg" | "image/png" => Self::upsert_favicon_jpg_png(id, logo, typ).await,
                 _ => Err(ErrorResponse::new(
                     ErrorResponseType::BadRequest,
-                    "Invalid mime type for auth provider logo",
+                    "Invalid mime type for client favicon",
                 )),
             }
         } else {
@@ -251,7 +251,7 @@ impl Logo {
             LogoType::AuthProvider => Self::delete(&slf.id, typ).await?,
         }
 
-        slf.upsert_self(typ, true).await
+        slf.upsert_self(typ, slf.res != LogoRes::Favicon).await
     }
 
     async fn upsert_jpg_png(id: String, logo: Vec<u8>, typ: LogoType) -> Result<(), ErrorResponse> {
