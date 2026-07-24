@@ -55,6 +55,8 @@ export let I18nAdminFr: I18nAdmin = {
             descVariables: `Chaque étiquette ci-dessous correspond au nom de la variable CSS.
                 Vous pouvez donc y faire référence dans les champs libres, par exemple avec
                 <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Aperçu du favicon du client',
+            faviconUpload: 'Téléverser un favicon',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

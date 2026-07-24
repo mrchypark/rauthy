@@ -32,6 +32,7 @@ use rauthy_data::entity::devices::DeviceAuthCode;
 use rauthy_data::entity::fed_cm::FedCMLoginStatus;
 use rauthy_data::entity::ip_rate_limit::DeviceIpRateLimit;
 use rauthy_data::entity::jwk::{JWKS, JWKSPublicKey, JwkKeyPair, JwkKeyPairType};
+use rauthy_data::entity::logos::LogoRes;
 use rauthy_data::entity::logos::{Logo, LogoType};
 use rauthy_data::entity::pow::PowEntity;
 use rauthy_data::entity::sessions::Session;
@@ -173,13 +174,16 @@ pub async fn get_authorize(
 
     let auth_providers_json = AuthProviderTemplate::get_all_json_template().await?;
     let logo_updated = Logo::find_updated(&client.id, &LogoType::Client).await?;
+    let favicon_updated =
+        Logo::find_updated_with_res(&client.id, LogoRes::Favicon, &LogoType::Client).await?;
 
-    let mut templates = Vec::with_capacity(8);
+    let mut templates = Vec::with_capacity(9);
     templates.push(HtmlTemplate::AuthProviders(auth_providers_json));
     templates.push(HtmlTemplate::ClientName(client.name.unwrap_or_default()));
     templates.push(HtmlTemplate::ClientUrl(
         client.client_uri.unwrap_or_default(),
     ));
+    templates.push(HtmlTemplate::ClientFaviconUpdated(favicon_updated));
     templates.push(HtmlTemplate::ClientLogoUpdated(logo_updated));
     templates.push(HtmlTemplate::IsRegOpen(
         RauthyConfig::get().vars.user_registration.enable,

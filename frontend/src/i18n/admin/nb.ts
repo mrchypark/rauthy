@@ -52,6 +52,8 @@ export let I18nAdminNb: I18nAdmin = {
             descVariables: `Hver påfølgende etikett er samtidig navnet på CSS variabelen. Det betyr at
                 for eksempel fritekst kan referere til variablene, like som med
                 <code>hsla(var(--action) / .7)</code>.`,
+            faviconPreviewAlt: 'Forhåndsvisning av klientens favicon',
+            faviconUpload: 'Last opp favicon',
         },
         claimsAtRoot: 'Emit claims at the token root',
         claimsAtRootWarning: `This client's claims are written at the token root

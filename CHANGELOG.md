@@ -4,6 +4,13 @@
 
 ### Changes
 
+#### Per-Client Favicons
+
+Client branding now supports a dedicated browser favicon for each client, independently of the
+login logo. Favicons can be uploaded, previewed, and removed from the Admin UI.
+
+[#1653](https://github.com/sebadob/rauthy/pull/1653)
+
 #### Session MFA Upgrade after Passkey Registration
 
 Registering a Passkey from the Account dashboard upgrades the current session to MFA now. Before,
