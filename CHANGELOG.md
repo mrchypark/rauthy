@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Bugfix
+
+#### Upstream Auth Provider Callbacks are Single-Use
+
+A callback for an upstream auth provider login is deleted as soon as it has been validated now.
+Before, only a failed `state`, XSRF token or PKCE verifier check deleted it. A callback that passed
+all three stayed in the cache until its 300 second TTL ran out, whether the login then succeeded or
+failed. This also makes the behaviour match what the function documented all along.
+
+[#1664](https://github.com/sebadob/rauthy/pull/1664)
+
 ### Changes
 
 #### Per-Client Favicons
